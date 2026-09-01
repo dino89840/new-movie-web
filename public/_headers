@@ -1,0 +1,15 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  X-Frame-Options: SAMEORIGIN
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' https: blob:; connect-src 'self' https://api.themoviedb.org https:; frame-src https://challenges.cloudflare.com; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'
+
+/style.css
+  Cache-Control: public, max-age=86400
+
+/app.js
+  Cache-Control: public, max-age=3600
+
+/index.html
+  Cache-Control: no-cache
