@@ -52,9 +52,21 @@ function toast(message) {
 
 async function api(path, options = {}) {
   const headers = {
-    ...(options.body ? { "content-type": "application/json" } : {}),
     ...(options.headers || {})
   };
+
+  const isFormData =
+    typeof FormData !== "undefined" &&
+    options.body instanceof FormData;
+
+  /*
+   * JSON request ဖြစ်မှသာ Content-Type ထည့်မယ်။
+   * FormData ဆိုရင် browser က multipart boundary ကို
+   * အလိုအလျောက်ထည့်နိုင်အောင် Content-Type မထည့်ရပါ။
+   */
+  if (options.body && !isFormData) {
+    headers["content-type"] = "application/json";
+  }
 
   if (
     state.csrf &&
@@ -70,10 +82,26 @@ async function api(path, options = {}) {
     headers
   });
 
-  const data = await response.json().catch(() => ({}));
+  const contentType =
+    response.headers.get("content-type") || "";
+
+  let data = {};
+
+  if (contentType.includes("application/json")) {
+    data = await response.json().catch(() => ({}));
+  } else {
+    const message = await response.text().catch(() => "");
+    data = {
+      error: message || `Request failed: ${response.status}`
+    };
+  }
 
   if (!response.ok) {
-    throw new Error(data.message || data.error || "Request failed");
+    throw new Error(
+      data.message ||
+      data.error ||
+      `Request failed: ${response.status}`
+    );
   }
 
   return data;
@@ -1306,56 +1334,528 @@ function renderEpisodePreview() {
 }
 
 async function searchTMDB() {
-  const query = document.querySelector("#tmdbSearch").value.trim();
-  if (query.length < 2) return;
+  const searchInput =
+    document.querySelector("#tmdbSearch");
+
+  const resultsElement =
+    document.querySelector("#tmdbResults");
+
+  const searchButton =
+    document.querySelector("#tmdbButton");
+
+  const query =
+    searchInput?.value.trim() || "";
+
+  if (query.length < 2) {
+    toast("TMDB ရှာရန် စာလုံးအနည်းဆုံး ၂ လုံးထည့်ပါ");
+    return;
+  }
 
   try {
+    searchButton.disabled = true;
+    searchButton.textContent = "Searching…";
+
     const data = await api(
       `admin/tmdb/search?q=${encodeURIComponent(query)}`
     );
 
-    document.querySelector("#tmdbResults").innerHTML =
-      data.results.map((item, index) => `
+    const results = data.results || [];
+
+    if (!results.length) {
+      resultsElement.innerHTML = `
+        <div class="empty-card">
+          TMDB result မတွေ့ပါ
+        </div>
+      `;
+
+      return;
+    }
+
+    resultsElement.innerHTML =
+      results.map((item, index) => `
         <button
           class="admin-row"
           data-tmdb-index="${index}"
           type="button"
         >
-          <img src="${escapeHTML(item.poster_url)}" alt="">
+          ${
+            item.poster_url
+              ? `
+                <img
+                  src="${escapeHTML(item.poster_url)}"
+                  alt="${escapeHTML(item.title)}"
+                  loading="lazy"
+                >
+              `
+              : `<div class="poster-placeholder">No image</div>`
+          }
+
           <span>
-            <strong>${escapeHTML(item.title)}</strong>
+            <strong>
+              ${escapeHTML(item.title)}
+            </strong>
+
             <br>
+
             <span class="muted">
               ${escapeHTML(item.year || "")}
-              · ${escapeHTML(item.tmdb_type)}
+              ·
+              ${escapeHTML(item.tmdb_type)}
             </span>
           </span>
         </button>
       `).join("");
 
-    document.querySelectorAll("[data-tmdb-index]").forEach(button => {
-      button.addEventListener("click", () => {
-        const item = data.results[Number(button.dataset.tmdbIndex)];
-        fillTMDB(item);
+    document
+      .querySelectorAll("[data-tmdb-index]")
+      .forEach(button => {
+        button.addEventListener(
+          "click",
+          async () => {
+            const index =
+              Number(button.dataset.tmdbIndex);
+
+            const item =
+              results[index];
+
+            if (!item) {
+              return;
+            }
+
+            const originalText =
+              button.querySelector("strong")
+                ?.textContent || "Selected movie";
+
+            try {
+              button.disabled = true;
+
+              const strong =
+                button.querySelector("strong");
+
+              if (strong) {
+                strong.textContent =
+                  "ပုံများကို R2 ပေါ်တင်နေပါသည်…";
+              }
+
+              await fillTMDB(item);
+            } catch (error) {
+              toast(
+                error.message ||
+                "TMDB ပုံတင်ခြင်း မအောင်မြင်ပါ"
+              );
+
+              button.disabled = false;
+
+              const strong =
+                button.querySelector("strong");
+
+              if (strong) {
+                strong.textContent =
+                  originalText;
+              }
+            }
+          }
+        );
       });
-    });
   } catch (error) {
     toast(error.message);
+  } finally {
+    searchButton.disabled = false;
+    searchButton.textContent = "Search";
   }
 }
 
-function fillTMDB(item) {
-  const form = document.querySelector("#titleForm");
 
-  for (const [key, value] of Object.entries(item)) {
+/*
+ * Movie website backend ကနေ TMDB image ကို download လုပ်မယ်။
+ * Browser က TMDB ကို တိုက်ရိုက် fetch မလုပ်ဘဲ
+ * same-origin admin proxy ကို သုံးထားပါတယ်။
+ */
+async function downloadTMDBImage(imageURL) {
+  if (!imageURL) {
+    return null;
+  }
+
+  const response = await fetch(
+    `/api/admin/images/proxy?url=${
+      encodeURIComponent(imageURL)
+    }`,
+    {
+      method: "GET",
+      credentials: "same-origin",
+      headers: {
+        accept:
+          "image/avif,image/webp,image/jpeg,image/png,image/*"
+      }
+    }
+  );
+
+  if (!response.ok) {
+    const result =
+      await response.json().catch(() => ({}));
+
+    throw new Error(
+      result.error ||
+      `TMDB image download failed: ${response.status}`
+    );
+  }
+
+  const contentType =
+    response.headers.get("content-type") || "";
+
+  if (!contentType.startsWith("image/")) {
+    throw new Error(
+      "TMDB က image မဟုတ်တဲ့ response ပြန်ပေးနေပါတယ်"
+    );
+  }
+
+  return response.blob();
+}
+
+
+/*
+ * Blob ကို browser canvas သုံးပြီး WEBP ပြောင်း/ချုံ့မယ်။
+ *
+ * Poster   : အများဆုံး width 1000px
+ * Backdrop : အများဆုံး width 1920px
+ */
+async function compressTMDBImage(
+  sourceBlob,
+  kind
+) {
+  if (!sourceBlob) {
+    return null;
+  }
+
+  const maximumWidth =
+    kind === "backdrop"
+      ? 1920
+      : 1000;
+
+  const quality =
+    kind === "backdrop"
+      ? 0.78
+      : 0.82;
+
+  const objectURL =
+    URL.createObjectURL(sourceBlob);
+
+  try {
+    const image =
+      await loadImageElement(objectURL);
+
+    let width =
+      image.naturalWidth || image.width;
+
+    let height =
+      image.naturalHeight || image.height;
+
+    if (!width || !height) {
+      throw new Error(
+        "Image dimension ဖတ်၍မရပါ"
+      );
+    }
+
+    if (width > maximumWidth) {
+      const ratio =
+        maximumWidth / width;
+
+      width =
+        Math.round(width * ratio);
+
+      height =
+        Math.round(height * ratio);
+    }
+
+    const canvas =
+      document.createElement("canvas");
+
+    canvas.width = width;
+    canvas.height = height;
+
+    const context =
+      canvas.getContext("2d", {
+        alpha: false
+      });
+
+    if (!context) {
+      throw new Error(
+        "Image compressor စတင်၍မရပါ"
+      );
+    }
+
+    /*
+     * Transparent PNG ဖြစ်ခဲ့ရင် အနက်ရောင်မဖြစ်အောင်
+     * အရင် background ဖြည့်ထားပါတယ်။
+     */
+    context.fillStyle = "#000000";
+    context.fillRect(
+      0,
+      0,
+      width,
+      height
+    );
+
+    context.drawImage(
+      image,
+      0,
+      0,
+      width,
+      height
+    );
+
+    const compressedBlob =
+      await canvasToBlob(
+        canvas,
+        "image/webp",
+        quality
+      );
+
+    if (!compressedBlob) {
+      throw new Error(
+        "Image compression မအောင်မြင်ပါ"
+      );
+    }
+
+    /*
+     * WEBP ပြောင်းပြီး size ပိုကြီးသွားရင်
+     * source image ကိုပဲ သုံးပါမယ်။
+     */
+    if (
+      compressedBlob.size >= sourceBlob.size &&
+      [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/avif"
+      ].includes(sourceBlob.type)
+    ) {
+      return new File(
+        [sourceBlob],
+        `${kind}.${extensionFromMime(sourceBlob.type)}`,
+        {
+          type:
+            sourceBlob.type ||
+            "image/jpeg"
+        }
+      );
+    }
+
+    return new File(
+      [compressedBlob],
+      `${kind}.webp`,
+      {
+        type: "image/webp"
+      }
+    );
+  } finally {
+    URL.revokeObjectURL(objectURL);
+  }
+}
+
+
+function loadImageElement(objectURL) {
+  return new Promise(
+    (resolve, reject) => {
+      const image =
+        new Image();
+
+      image.onload = () =>
+        resolve(image);
+
+      image.onerror = () =>
+        reject(
+          new Error(
+            "TMDB image ဖတ်၍မရပါ"
+          )
+        );
+
+      image.src = objectURL;
+    }
+  );
+}
+
+
+function canvasToBlob(
+  canvas,
+  mimeType,
+  quality
+) {
+  return new Promise(
+    (resolve, reject) => {
+      canvas.toBlob(
+        blob => {
+          if (!blob) {
+            reject(
+              new Error(
+                "Image compression မအောင်မြင်ပါ"
+              )
+            );
+
+            return;
+          }
+
+          resolve(blob);
+        },
+        mimeType,
+        quality
+      );
+    }
+  );
+}
+
+
+function extensionFromMime(mimeType) {
+  const extensions = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/avif": "avif"
+  };
+
+  return extensions[mimeType] || "jpg";
+}
+
+
+/*
+ * ချုံ့ပြီးသား image file ကို movie backend ဆီပို့မယ်။
+ * Movie backend က IMPORT_API_KEY ထည့်ပြီး
+ * external R2 uploader ဆီ ဆက်ပို့ပေးပါမယ်။
+ */
+async function uploadImageToR2(
+  file,
+  kind
+) {
+  const formData =
+    new FormData();
+
+  formData.append(
+    "file",
+    file,
+    file.name
+  );
+
+  formData.append(
+    "kind",
+    kind
+  );
+
+  const result =
+    await api(
+      "admin/images/upload",
+      {
+        method: "POST",
+        body: formData
+      }
+    );
+
+  if (!result.url) {
+    throw new Error(
+      `${kind} R2 URL မရရှိပါ`
+    );
+  }
+
+  return result.url;
+}
+
+
+/*
+ * TMDB URL တစ်ခုကို—
+ *
+ * 1. Movie backend proxy ဖြင့် download
+ * 2. Browser မှာ compress
+ * 3. Image uploader API မှတစ်ဆင့် R2 upload
+ * 4. R2 public URL ပြန်ယူ
+ */
+async function importTMDBImage(
+  imageURL,
+  kind
+) {
+  if (!imageURL) {
+    return "";
+  }
+
+  const originalBlob =
+    await downloadTMDBImage(imageURL);
+
+  const compressedFile =
+    await compressTMDBImage(
+      originalBlob,
+      kind
+    );
+
+  return uploadImageToR2(
+    compressedFile,
+    kind
+  );
+}
+
+
+/*
+ * TMDB result ကိုရွေးချယ်လိုက်တာနဲ့
+ * poster/backdrop နှစ်ပုံလုံး R2 ပေါ်တင်ပြီးမှ
+ * form ထဲ ဖြည့်ပါမယ်။
+ *
+ * Upload fail ဖြစ်ရင် TMDB URL ကို form ထဲ မဖြည့်ပါ။
+ */
+async function fillTMDB(item) {
+  const form =
+    document.querySelector("#titleForm");
+
+  if (!form) {
+    throw new Error(
+      "Title form မတွေ့ပါ"
+    );
+  }
+
+  toast(
+    "TMDB ပုံများကို download/ချုံ့/R2 upload လုပ်နေပါသည်…"
+  );
+
+  const [
+    posterURL,
+    backdropURL
+  ] = await Promise.all([
+    importTMDBImage(
+      item.poster_url,
+      "poster"
+    ),
+
+    importTMDBImage(
+      item.backdrop_url,
+      "backdrop"
+    )
+  ]);
+
+  /*
+   * TMDB image URL ကို form ထဲမသိမ်းဘဲ
+   * R2 URL ဖြင့် အစားထိုးထားပါတယ်။
+   */
+  const importedItem = {
+    ...item,
+    poster_url: posterURL,
+    backdrop_url: backdropURL
+  };
+
+  for (
+    const [key, value]
+    of Object.entries(importedItem)
+  ) {
     if (form.elements[key]) {
-      form.elements[key].value = value ?? "";
+      form.elements[key].value =
+        value ?? "";
     }
   }
 
-  document.querySelector("#tmdbResults").innerHTML = "";
-  toast("TMDB data ဖြည့်ပြီးပါပြီ");
+  document
+    .querySelector("#tmdbResults")
+    .innerHTML = "";
+
+  toast(
+    "TMDB ပုံများကို R2 ပေါ်တင်ပြီး form ထဲဖြည့်ပြီးပါပြီ"
+  );
 }
+
 
 async function saveTitle(event) {
   event.preventDefault();
