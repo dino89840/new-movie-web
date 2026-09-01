@@ -1536,10 +1536,7 @@ async function adminImageProxy(request, env) {
   );
 }
 
-async function adminForwardImageUpload(
-  request,
-  env
-) {
+async function adminForwardImageUpload(request, env) {
   const admin =
     await requireAdmin(request, env, true);
 
@@ -1560,196 +1557,43 @@ async function adminForwardImageUpload(
     );
   }
 
-  let body;
+  const incomingFormData =
+    await request.formData();
 
-  try {
-    body = await readBody(request);
-  } catch {
-    return json(
-      {
-        error:
-          "JSON request body လိုအပ်ပါသည်"
-      },
-      400
-    );
-  }
+  const file =
+    incomingFormData.get("file");
 
-  const imageURL =
-    String(body.url || "").trim();
+  const kind = String(
+    incomingFormData.get("kind") || "image"
+  );
 
-  const kind =
-    String(body.kind || "image")
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]/g, "")
-      .slice(0, 30) ||
-    "image";
-
-  if (!imageURL) {
-    return json(
-      {
-        error:
-          "TMDB image URL မပါပါ"
-      },
-      400
-    );
-  }
-
-  let targetURL;
-
-  try {
-    targetURL =
-      new URL(imageURL);
-  } catch {
-    return json(
-      {
-        error:
-          "TMDB image URL မမှန်ပါ"
-      },
-      400
-    );
-  }
-
-  /*
-   * SSRF မဖြစ်စေရန် TMDB image host ကိုသာ
-   * download ခွင့်ပြုထားပါတယ်။
-   */
   if (
-    targetURL.protocol !== "https:" ||
-    targetURL.hostname !== "image.tmdb.org"
+    !file ||
+    typeof file.arrayBuffer !== "function"
   ) {
     return json(
-      {
-        error:
-          "ခွင့်မပြုထားသော image host ဖြစ်နေပါသည်"
-      },
-      403
+      { error: "Image file မပါပါ" },
+      400
     );
   }
 
-  let imageResponse;
-
-  try {
-    imageResponse =
-      await fetch(
-        targetURL.toString(),
-        {
-          method: "GET",
-          headers: {
-            /*
-             * AVIF ကို မတောင်းတော့ပါ။
-             * TMDB က JPEG/PNG/WEBP ပြန်ပေးစေရန်
-             * ရိုးရှင်းသော Accept header သုံးထားပါတယ်။
-             */
-            accept:
-              "image/jpeg,image/png,image/webp,image/*;q=0.8",
-            "user-agent":
-              "CMFLIX-TMDB-Importer/1.0"
-          },
-          redirect: "follow",
-          cf: {
-            cacheEverything: true,
-            cacheTtl: 86400
-          }
-        }
-      );
-  } catch (error) {
-    console.error(
-      "TMDB image fetch error:",
-      error
-    );
-
+  if (
+    Number(file.size || 0) >
+    10 * 1024 * 1024
+  ) {
     return json(
-      {
-        error:
-          "TMDB image server ကို ချိတ်ဆက်၍မရပါ"
-      },
-      502
-    );
-  }
-
-  if (!imageResponse.ok) {
-    return json(
-      {
-        error:
-          `TMDB image download failed: ${imageResponse.status}`
-      },
-      502
-    );
-  }
-
-  const rawContentType =
-    imageResponse.headers.get(
-      "content-type"
-    ) || "";
-
-  const mimeType =
-    rawContentType
-      .split(";")[0]
-      .trim()
-      .toLowerCase();
-
-  const allowedMimeTypes = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-    "image/avif": "avif"
-  };
-
-  const extension =
-    allowedMimeTypes[mimeType];
-
-  if (!extension) {
-    return json(
-      {
-        error:
-          `TMDB က image မဟုတ်သော response ပြန်ပေးနေပါသည်: ${
-            mimeType || "unknown content-type"
-          }`
-      },
-      502
-    );
-  }
-
-  const imageBlob =
-    await imageResponse.blob();
-
-  if (!imageBlob.size) {
-    return json(
-      {
-        error:
-          "TMDB image file အလွတ်ဖြစ်နေပါသည်"
-      },
-      502
-    );
-  }
-
-  const maximumSize =
-    10 * 1024 * 1024;
-
-  if (imageBlob.size > maximumSize) {
-    return json(
-      {
-        error:
-          "TMDB image သည် 10 MB ထက်ကြီးနေပါသည်"
-      },
+      { error: "ပုံဖိုင်သည် 10 MB ထက်ကြီးနေပါသည်" },
       413
     );
   }
 
-  /*
-   * Image uploader repo ရဲ့
-   * POST /internal/upload ကို ခေါ်မယ်။
-   */
   const outgoingFormData =
     new FormData();
 
-  const fileName =
-    `tmdb-${kind}-${crypto.randomUUID()}.${extension}`;
-
   outgoingFormData.append(
     "file",
-    imageBlob,
-    fileName
+    file,
+    file.name || "tmdb-image.webp"
   );
 
   outgoingFormData.append(
@@ -1757,76 +1601,35 @@ async function adminForwardImageUpload(
     kind
   );
 
-  let uploadResponse;
-
-  try {
-    uploadResponse =
-      await fetch(
-        String(
-          env.IMG_UPLOAD_ENDPOINT
-        ).trim(),
-        {
-          method: "POST",
-          headers: {
-            authorization:
-              `Bearer ${env.IMG_UPLOAD_API_KEY}`
-          },
-          body: outgoingFormData
-        }
-      );
-  } catch (error) {
-    console.error(
-      "Image uploader connection error:",
-      error
-    );
-
-    return json(
+  const uploadResponse =
+    await fetch(
+      String(env.IMG_UPLOAD_ENDPOINT),
       {
-        error:
-          "Image uploader server ကို ချိတ်ဆက်၍မရပါ"
-      },
-      502
+        method: "POST",
+        headers: {
+          authorization:
+            `Bearer ${env.IMG_UPLOAD_API_KEY}`
+        },
+        body: outgoingFormData
+      }
     );
-  }
 
-  const uploadContentType =
-    uploadResponse.headers.get(
-      "content-type"
-    ) || "";
-
-  let result = {};
-
-  if (
-    uploadContentType.includes(
-      "application/json"
-    )
-  ) {
-    result =
-      await uploadResponse
-        .json()
-        .catch(() => ({}));
-  } else {
-    const message =
-      await uploadResponse
-        .text()
-        .catch(() => "");
-
-    result = {
-      error:
-        message ||
-        "Image uploader မှ JSON response ပြန်မရပါ"
-    };
-  }
+  const result =
+    await uploadResponse
+      .json()
+      .catch(() => ({}));
 
   if (!uploadResponse.ok) {
     return json(
       {
         error:
           result.error ||
-          result.message ||
           `Image uploader error: ${uploadResponse.status}`
       },
-      502
+      uploadResponse.status >= 400 &&
+      uploadResponse.status < 600
+        ? uploadResponse.status
+        : 502
     );
   }
 
@@ -1834,7 +1637,7 @@ async function adminForwardImageUpload(
     return json(
       {
         error:
-          "Image uploader က public URL ပြန်မပေးပါ"
+          "Image uploader က URL ပြန်မပေးပါ"
       },
       502
     );
@@ -1846,7 +1649,6 @@ async function adminForwardImageUpload(
     url: result.url
   });
 }
-
 
 
 async function adminDeleteTitle(request, env, id) {
