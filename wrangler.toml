@@ -1,0 +1,13 @@
+name = "cmflix"
+compatibility_date = "2026-09-01"
+pages_build_output_dir = "public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cmflix-db"
+database_id = "YOUR_D1_DATABASE_ID"
+
+[vars]
+APP_NAME = "CMFLIX"
+SESSION_DAYS = "30"
+TURNSTILE_SITE_KEY = ""
