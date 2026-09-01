@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="my">
+<head>
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1,viewport-fit=cover"
+  >
+  <meta name="theme-color" content="#080a0f">
+  <title>CMFLIX</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="brand" data-page="home" aria-label="Home">
+      <span class="brand-mark">CM</span>
+      <span>FLIX</span>
+    </button>
+
+    <nav class="nav">
+      <button data-category="movies">Movies</button>
+      <button data-category="series">Series</button>
+      <button data-category="lugyi">Lugyi</button>
+      <button data-page="favorites">Favorites</button>
+    </nav>
+
+    <button id="accountButton" class="icon-button" aria-label="Account">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7 8a7 7 0 0 0-14 0"/>
+      </svg>
+    </button>
+  </header>
+
+  <main id="app">
+    <section class="loading-card">Loading CMFLIX…</section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <dialog id="authDialog" class="modal">
+    <button class="modal-close" data-close-dialog>×</button>
+
+    <div id="authContent"></div>
+  </dialog>
+
+  <dialog id="playerDialog" class="player-modal">
+    <button class="player-close" data-close-player>×</button>
+    <div id="playerTitle" class="player-title"></div>
+    <video
+      id="videoPlayer"
+      controls
+      playsinline
+      preload="metadata"
+    ></video>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
