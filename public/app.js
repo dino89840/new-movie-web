@@ -1540,17 +1540,30 @@ accountButton.addEventListener("click", () => openAuth());
 document.querySelector("[data-close-dialog]")
   .addEventListener("click", () => authDialog.close());
 
-document.querySelector("[data-close-player]")
+function stopPlayer() {
+  player.pause();
+  player.removeAttribute("src");
+  player.load();
+
+  if (state.hls) {
+    state.hls.destroy();
+    state.hls = null;
+  }
+}
+
+document
+  .querySelector("[data-close-player]")
   .addEventListener("click", () => {
-    player.pause();
+    stopPlayer();
 
-    if (state.hls) {
-      state.hls.destroy();
-      state.hls = null;
+    if (playerDialog.open) {
+      playerDialog.close();
     }
-
-    playerDialog.close();
   });
+
+playerDialog.addEventListener("close", () => {
+  stopPlayer();
+});
 
 authContent.addEventListener("click", async event => {
   if (event.target.closest("#goAdmin")) {
