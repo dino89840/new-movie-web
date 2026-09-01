@@ -679,14 +679,81 @@ async function getStatus(env) {
     }
   );
 }
+/* -------------------- TMDB helpers -------------------- */
 
-/* -------------------- Public titles -------------------- */
+async function fetchTMDBDetails(env, tmdbType, tmdbId) {
+  if (!env.TMDB_API_KEY || !tmdbId) {
+    return null;
+  }
 
+  const type = tmdbType === "tv" ? "tv" : "movie";
+
+  const tmdbURL = new URL(
+    `https://api.themoviedb.org/3/${type}/${encodeURIComponent(tmdbId)}`
+  );
+
+  tmdbURL.searchParams.set("api_key", env.TMDB_API_KEY);
+  tmdbURL.searchParams.set("language", "en-US");
+  tmdbURL.searchParams.set("append_to_response", "credits");
+
+  try {
+    const response = await fetch(tmdbURL, {
+      headers: {
+        accept: "application/json"
+      },
+      cf: {
+        cacheTtl: 21600,
+        cacheEverything: true
+      }
+    });
+
+    if (!response.ok) {
+      console.error(
+        "TMDB details request failed:",
+        response.status,
+        type,
+        tmdbId
+      );
+
+      return null;
+    }
+
+    const data = await response.json();
+
+    return {
+      genres: (data.genres || [])
+        .map(genre => genre.name)
+        .filter(Boolean)
+        .join(", "),
+
+      cast: (data.credits?.cast || [])
+        .slice(0, 15)
+        .map(person => ({
+          id: person.id,
+          name: person.name || person.original_name || "",
+          character: person.character || "",
+          profile_url: person.profile_path
+            ? `https://image.tmdb.org/t/p/w185${person.profile_path}`
+            : ""
+        }))
+    };
+  } catch (error) {
+    console.error("TMDB details error:", error);
+    return null;
+  }
+}
 async function publicTitles(request, env, context) {
   const url = new URL(request.url);
   const category = url.searchParams.get("category") || "movies";
-  const search = String(url.searchParams.get("q") || "").trim().slice(0, 50);
-  const page = Math.max(1, Number(url.searchParams.get("page") || 1));
+  const search = String(url.searchParams.get("q") || "")
+    .trim()
+    .slice(0, 50);
+
+  const page = Math.max(
+    1,
+    Number(url.searchParams.get("page") || 1)
+  );
+
   const limit = 18;
   const offset = (page - 1) * limit;
 
@@ -695,10 +762,20 @@ async function publicTitles(request, env, context) {
   }
 
   const cache = caches.default;
-  const cacheKey = new Request(url.toString(), { method: "GET" });
+  const cacheURL = new URL(url.toString());
+
+  // အဟောင်း cache နဲ့မရောစေရန်
+  cacheURL.searchParams.set("_dataVersion", "2");
+
+  const cacheKey = new Request(cacheURL.toString(), {
+    method: "GET"
+  });
+
   const cached = await cache.match(cacheKey);
 
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   let query = `
     SELECT
@@ -717,70 +794,150 @@ async function publicTitles(request, env, context) {
     params.push(`%${search}%`, `%${search}%`);
   }
 
-  query += " ORDER BY featured DESC, created_at DESC LIMIT ? OFFSET ?";
+  query += `
+    ORDER BY featured DESC, created_at DESC
+    LIMIT ? OFFSET ?
+  `;
+
   params.push(limit, offset);
 
-  const result = await env.DB.prepare(query).bind(...params).all();
+  const result = await env.DB
+    .prepare(query)
+    .bind(...params)
+    .all();
+
+  const databaseItems = result.results || [];
+
+  /*
+   * Database ထဲ genres မရှိသေးတဲ့ အဟောင်းကားတွေကို
+   * TMDB ကနေ genre ပြန်ယူပေးပါတယ်။
+   */
+  const items = await Promise.all(
+    databaseItems.map(async item => {
+      if (
+        String(item.genres || "").trim() ||
+        !item.tmdb_id
+      ) {
+        return item;
+      }
+
+      const tmdb = await fetchTMDBDetails(
+        env,
+        item.tmdb_type,
+        item.tmdb_id
+      );
+
+      return {
+        ...item,
+        genres: tmdb?.genres || ""
+      };
+    })
+  );
 
   const response = json(
     {
-      items: result.results || [],
+      items,
       page,
-      hasMore: (result.results || []).length === limit
+      hasMore: databaseItems.length === limit
     },
     200,
     {
       "cache-control":
-        "public, max-age=30, s-maxage=60, stale-while-revalidate=120"
+        "public, max-age=30, s-maxage=300, stale-while-revalidate=600"
     }
   );
 
-  context.waitUntil(cache.put(cacheKey, response.clone()));
+  context.waitUntil(
+    cache.put(cacheKey, response.clone())
+  );
+
   return response;
 }
 
+
 async function publicTitle(request, env, slug, context) {
   const cache = caches.default;
-  const cacheKey = new Request(request.url, { method: "GET" });
+  const cacheURL = new URL(request.url);
+
+  // အဟောင်း cast မပါတဲ့ cache ကိုရှောင်ရန်
+  cacheURL.searchParams.set("_dataVersion", "2");
+
+  const cacheKey = new Request(cacheURL.toString(), {
+    method: "GET"
+  });
+
   const cached = await cache.match(cacheKey);
 
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   const title = await env.DB.prepare(
-    `SELECT * FROM titles
+    `SELECT *
+     FROM titles
      WHERE slug=? AND status='public'
      LIMIT 1`
-  ).bind(slug).first();
+  )
+    .bind(slug)
+    .first();
 
   if (!title) {
     return json({ error: "ဇာတ်ကားမတွေ့ပါ" }, 404);
   }
 
   const episodes = await env.DB.prepare(
-    `SELECT id, season_number, episode_number,
-            episode_title, video_url, video_type
+    `SELECT
+       id,
+       season_number,
+       episode_number,
+       episode_title,
+       video_url,
+       video_type
      FROM episodes
      WHERE title_id=?
      ORDER BY season_number, episode_number`
-  ).bind(title.id).all();
+  )
+    .bind(title.id)
+    .all();
+
+  const tmdb = title.tmdb_id
+    ? await fetchTMDBDetails(
+        env,
+        title.tmdb_type,
+        title.tmdb_id
+      )
+    : null;
+
+  const item = {
+    ...title,
+
+    // DB ထဲမှာ genre ရှိရင် DB ကိုသုံးမယ်။
+    // မရှိရင် TMDB က genre ကိုသုံးမယ်။
+    genres:
+      String(title.genres || "").trim() ||
+      tmdb?.genres ||
+      "",
+
+    cast: tmdb?.cast || [],
+    episodes: episodes.results || []
+  };
 
   const response = json(
-    {
-      item: {
-        ...title,
-        episodes: episodes.results || []
-      }
-    },
+    { item },
     200,
     {
       "cache-control":
-        "public, max-age=30, s-maxage=60, stale-while-revalidate=120"
+        "public, max-age=30, s-maxage=300, stale-while-revalidate=600"
     }
   );
 
-  context.waitUntil(cache.put(cacheKey, response.clone()));
+  context.waitUntil(
+    cache.put(cacheKey, response.clone())
+  );
+
   return response;
 }
+
 
 /* -------------------- Favorites -------------------- */
 
@@ -858,28 +1015,48 @@ async function removeFavorite(request, env, titleId) {
 
 async function tmdbSearch(request, env) {
   const admin = await requireAdmin(request, env);
-  if (admin.error) return admin.error;
+
+  if (admin.error) {
+    return admin.error;
+  }
 
   if (!env.TMDB_API_KEY) {
-    return json({ error: "TMDB_API_KEY မသတ်မှတ်ရသေးပါ" }, 500);
+    return json(
+      { error: "TMDB_API_KEY မသတ်မှတ်ရသေးပါ" },
+      500
+    );
   }
 
   const url = new URL(request.url);
-  const query = String(url.searchParams.get("q") || "").trim().slice(0, 80);
+
+  const query = String(
+    url.searchParams.get("q") || ""
+  )
+    .trim()
+    .slice(0, 80);
 
   if (query.length < 2) {
     return json({ results: [] });
   }
 
-  const tmdbURL = new URL("https://api.themoviedb.org/3/search/multi");
-  tmdbURL.searchParams.set("api_key", env.TMDB_API_KEY);
+  const tmdbURL = new URL(
+    "https://api.themoviedb.org/3/search/multi"
+  );
+
+  tmdbURL.searchParams.set(
+    "api_key",
+    env.TMDB_API_KEY
+  );
+
   tmdbURL.searchParams.set("query", query);
   tmdbURL.searchParams.set("include_adult", "false");
   tmdbURL.searchParams.set("language", "en-US");
   tmdbURL.searchParams.set("page", "1");
 
   const response = await fetch(tmdbURL, {
-    headers: { accept: "application/json" },
+    headers: {
+      accept: "application/json"
+    },
     cf: {
       cacheTtl: 3600,
       cacheEverything: true
@@ -887,36 +1064,107 @@ async function tmdbSearch(request, env) {
   });
 
   if (!response.ok) {
-    return json({ error: "TMDB request မအောင်မြင်ပါ" }, 502);
+    return json(
+      { error: "TMDB request မအောင်မြင်ပါ" },
+      502
+    );
   }
 
   const data = await response.json();
 
+  /*
+   * TMDB genre ID များ
+   * Movie နဲ့ TV genre နှစ်မျိုးလုံးထည့်ထားပါတယ်။
+   */
+  const genreNames = {
+    12: "Adventure",
+    14: "Fantasy",
+    16: "Animation",
+    18: "Drama",
+    27: "Horror",
+    28: "Action",
+    35: "Comedy",
+    36: "History",
+    37: "Western",
+    53: "Thriller",
+    80: "Crime",
+    99: "Documentary",
+    878: "Science Fiction",
+    9648: "Mystery",
+    10402: "Music",
+    10749: "Romance",
+    10751: "Family",
+    10752: "War",
+    10759: "Action & Adventure",
+    10762: "Kids",
+    10763: "News",
+    10764: "Reality",
+    10765: "Sci-Fi & Fantasy",
+    10766: "Soap",
+    10767: "Talk",
+    10768: "War & Politics",
+    10770: "TV Movie"
+  };
+
   const results = (data.results || [])
-    .filter(item => item.media_type === "movie" || item.media_type === "tv")
+    .filter(item =>
+      item.media_type === "movie" ||
+      item.media_type === "tv"
+    )
     .slice(0, 15)
-    .map(item => ({
-      tmdb_id: item.id,
-      tmdb_type: item.media_type,
-      title: item.title || item.name || "",
-      original_title: item.original_title || item.original_name || "",
-      overview: item.overview || "",
-      poster_url: item.poster_path
-        ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
-        : "",
-      backdrop_url: item.backdrop_path
-        ? `https://image.tmdb.org/t/p/original${item.backdrop_path}`
-        : "",
-      release_date: item.release_date || item.first_air_date || "",
-      year: Number(
-        String(item.release_date || item.first_air_date || "").slice(0, 4)
-      ) || null,
-      rating: Number(item.vote_average || 0),
-      category: item.media_type === "tv" ? "series" : "movies"
-    }));
+    .map(item => {
+      const releaseDate =
+        item.release_date ||
+        item.first_air_date ||
+        "";
+
+      return {
+        tmdb_id: item.id,
+        tmdb_type: item.media_type,
+
+        title:
+          item.title ||
+          item.name ||
+          "",
+
+        original_title:
+          item.original_title ||
+          item.original_name ||
+          "",
+
+        overview: item.overview || "",
+
+        poster_url: item.poster_path
+          ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
+          : "",
+
+        backdrop_url: item.backdrop_path
+          ? `https://image.tmdb.org/t/p/original${item.backdrop_path}`
+          : "",
+
+        release_date: releaseDate,
+
+        year:
+          Number(String(releaseDate).slice(0, 4)) ||
+          null,
+
+        rating: Number(item.vote_average || 0),
+
+        category:
+          item.media_type === "tv"
+            ? "series"
+            : "movies",
+
+        genres: (item.genre_ids || [])
+          .map(id => genreNames[id])
+          .filter(Boolean)
+          .join(", ")
+      };
+    });
 
   return json({ results });
 }
+
 
 /* -------------------- Admin CRUD -------------------- */
 
