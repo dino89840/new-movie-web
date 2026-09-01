@@ -52,21 +52,9 @@ function toast(message) {
 
 async function api(path, options = {}) {
   const headers = {
+    ...(options.body ? { "content-type": "application/json" } : {}),
     ...(options.headers || {})
   };
-
-  const isFormData =
-    typeof FormData !== "undefined" &&
-    options.body instanceof FormData;
-
-  /*
-   * JSON request ဖြစ်မှသာ Content-Type ထည့်မယ်။
-   * FormData ဆိုရင် browser က multipart boundary ကို
-   * အလိုအလျောက်ထည့်နိုင်အောင် Content-Type မထည့်ရပါ။
-   */
-  if (options.body && !isFormData) {
-    headers["content-type"] = "application/json";
-  }
 
   if (
     state.csrf &&
@@ -82,26 +70,10 @@ async function api(path, options = {}) {
     headers
   });
 
-  const contentType =
-    response.headers.get("content-type") || "";
-
-  let data = {};
-
-  if (contentType.includes("application/json")) {
-    data = await response.json().catch(() => ({}));
-  } else {
-    const message = await response.text().catch(() => "");
-    data = {
-      error: message || `Request failed: ${response.status}`
-    };
-  }
+  const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(
-      data.message ||
-      data.error ||
-      `Request failed: ${response.status}`
-    );
+    throw new Error(data.message || data.error || "Request failed");
   }
 
   return data;
@@ -1334,238 +1306,56 @@ function renderEpisodePreview() {
 }
 
 async function searchTMDB() {
-  const searchInput =
-    document.querySelector("#tmdbSearch");
-
-  const resultsElement =
-    document.querySelector("#tmdbResults");
-
-  const searchButton =
-    document.querySelector("#tmdbButton");
-
-  const query =
-    searchInput?.value.trim() || "";
-
-  if (query.length < 2) {
-    toast("TMDB ရှာရန် စာလုံးအနည်းဆုံး ၂ လုံးထည့်ပါ");
-    return;
-  }
+  const query = document.querySelector("#tmdbSearch").value.trim();
+  if (query.length < 2) return;
 
   try {
-    searchButton.disabled = true;
-    searchButton.textContent = "Searching…";
-
     const data = await api(
       `admin/tmdb/search?q=${encodeURIComponent(query)}`
     );
 
-    const results = data.results || [];
-
-    if (!results.length) {
-      resultsElement.innerHTML = `
-        <div class="empty-card">
-          TMDB result မတွေ့ပါ
-        </div>
-      `;
-
-      return;
-    }
-
-    resultsElement.innerHTML =
-      results.map((item, index) => `
+    document.querySelector("#tmdbResults").innerHTML =
+      data.results.map((item, index) => `
         <button
           class="admin-row"
           data-tmdb-index="${index}"
           type="button"
         >
-          ${
-            item.poster_url
-              ? `
-                <img
-                  src="${escapeHTML(item.poster_url)}"
-                  alt="${escapeHTML(item.title)}"
-                  loading="lazy"
-                >
-              `
-              : `<div class="poster-placeholder">No image</div>`
-          }
-
+          <img src="${escapeHTML(item.poster_url)}" alt="">
           <span>
-            <strong>
-              ${escapeHTML(item.title)}
-            </strong>
-
+            <strong>${escapeHTML(item.title)}</strong>
             <br>
-
             <span class="muted">
               ${escapeHTML(item.year || "")}
-              ·
-              ${escapeHTML(item.tmdb_type)}
+              · ${escapeHTML(item.tmdb_type)}
             </span>
           </span>
         </button>
       `).join("");
 
-    document
-      .querySelectorAll("[data-tmdb-index]")
-      .forEach(button => {
-        button.addEventListener(
-          "click",
-          async () => {
-            const index =
-              Number(button.dataset.tmdbIndex);
-
-            const item =
-              results[index];
-
-            if (!item) {
-              return;
-            }
-
-            const originalText =
-              button.querySelector("strong")
-                ?.textContent || "Selected movie";
-
-            try {
-              button.disabled = true;
-
-              const strong =
-                button.querySelector("strong");
-
-              if (strong) {
-                strong.textContent =
-                  "ပုံများကို R2 ပေါ်တင်နေပါသည်…";
-              }
-
-              await fillTMDB(item);
-            } catch (error) {
-              toast(
-                error.message ||
-                "TMDB ပုံတင်ခြင်း မအောင်မြင်ပါ"
-              );
-
-              button.disabled = false;
-
-              const strong =
-                button.querySelector("strong");
-
-              if (strong) {
-                strong.textContent =
-                  originalText;
-              }
-            }
-          }
-        );
+    document.querySelectorAll("[data-tmdb-index]").forEach(button => {
+      button.addEventListener("click", () => {
+        const item = data.results[Number(button.dataset.tmdbIndex)];
+        fillTMDB(item);
       });
+    });
   } catch (error) {
     toast(error.message);
-  } finally {
-    searchButton.disabled = false;
-    searchButton.textContent = "Search";
   }
 }
 
+function fillTMDB(item) {
+  const form = document.querySelector("#titleForm");
 
-/*
- * TMDB image ကို browser မှာ decode/compress မလုပ်တော့ပါ။
- *
- * Movie backend က—
- * 1. TMDB image ကိုတိုက်ရိုက် download လုပ်မယ်
- * 2. Image uploader private API ဆီပို့မယ်
- * 3. R2 public URL ကို browser ဆီပြန်ပေးမယ်
- */
-async function importTMDBImage(
-  imageURL,
-  kind
-) {
-  if (!imageURL) {
-    return "";
-  }
-
-  const result = await api(
-    "admin/images/upload",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        url: imageURL,
-        kind
-      })
-    }
-  );
-
-  if (!result.url) {
-    throw new Error(
-      `${kind} R2 URL ပြန်မရပါ`
-    );
-  }
-
-  return result.url;
-}
-
-
-/*
- * TMDB result ကိုရွေးသောအခါ
- * poster/backdrop ကို R2 သို့တင်ပြီး
- * ရရှိလာသော R2 URL များကို form ထဲဖြည့်မယ်။
- */
-async function fillTMDB(item) {
-  const form =
-    document.querySelector("#titleForm");
-
-  if (!form) {
-    throw new Error(
-      "Title form မတွေ့ပါ"
-    );
-  }
-
-  toast(
-    "TMDB ပုံများကို R2 ပေါ်တင်နေပါသည်…"
-  );
-
-  const [
-    posterURL,
-    backdropURL
-  ] = await Promise.all([
-    importTMDBImage(
-      item.poster_url,
-      "poster"
-    ),
-
-    importTMDBImage(
-      item.backdrop_url,
-      "backdrop"
-    )
-  ]);
-
-  const importedItem = {
-    ...item,
-    poster_url: posterURL,
-    backdrop_url: backdropURL
-  };
-
-  for (
-    const [key, value]
-    of Object.entries(importedItem)
-  ) {
+  for (const [key, value] of Object.entries(item)) {
     if (form.elements[key]) {
-      form.elements[key].value =
-        value ?? "";
+      form.elements[key].value = value ?? "";
     }
   }
 
-  const resultsElement =
-    document.querySelector("#tmdbResults");
-
-  if (resultsElement) {
-    resultsElement.innerHTML = "";
-  }
-
-  toast(
-    "TMDB data နှင့် R2 ပုံ URL များ ဖြည့်ပြီးပါပြီ"
-  );
+  document.querySelector("#tmdbResults").innerHTML = "";
+  toast("TMDB data ဖြည့်ပြီးပါပြီ");
 }
-
-
 
 async function saveTitle(event) {
   event.preventDefault();
