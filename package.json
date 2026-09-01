@@ -1,0 +1,14 @@
+{
+  "name": "cmflix",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler pages dev public",
+    "deploy": "wrangler pages deploy public",
+    "db:local": "wrangler d1 execute cmflix-db --local --file=schema.sql",
+    "db:remote": "wrangler d1 execute cmflix-db --remote --file=schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
