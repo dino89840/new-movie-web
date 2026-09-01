@@ -146,21 +146,64 @@ function route() {
 
   location.hash = "#/movies";
 }
+function splitGenres(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map(item => String(item || "").trim())
+      .filter(Boolean);
+  }
+
+  return String(value || "")
+    .split(/[,|/]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function renderMovieItems(items) {
+  return items.length
+    ? items.map(movieCard).join("")
+    : `
+      <section class="empty-card full">
+        ဇာတ်ကားမတွေ့ပါ
+      </section>
+    `;
+}
 
 async function renderHome(category) {
-  app.innerHTML = `<section class="loading-card">Loading…</section>`;
+  app.innerHTML = `
+    <section class="loading-card">
+      Loading…
+    </section>
+  `;
 
-  document.querySelectorAll("[data-category]").forEach(button => {
-    button.classList.toggle(
-      "active",
-      button.dataset.category === category
-    );
-  });
+  document
+    .querySelectorAll("[data-category]")
+    .forEach(button => {
+      button.classList.toggle(
+        "active",
+        button.dataset.category === category
+      );
+    });
 
   try {
-    const data = await api(`titles?category=${encodeURIComponent(category)}`);
-    const items = data.items || [];
-    const featured = items.find(item => item.featured) || items[0];
+    const data = await api(
+      `titles?category=${encodeURIComponent(category)}`
+    );
+
+    let currentItems = data.items || [];
+    let activeGenre = "all";
+
+    const featured =
+      currentItems.find(item => item.featured) ||
+      currentItems[0];
+
+    const genres = [
+      ...new Set(
+        currentItems.flatMap(item =>
+          splitGenres(item.genres)
+        )
+      )
+    ].sort((a, b) => a.localeCompare(b));
 
     app.innerHTML = `
       ${
@@ -169,59 +212,166 @@ async function renderHome(category) {
             <section
               class="hero"
               style="--hero-image:url('${escapeHTML(
-                featured.backdrop_url || featured.poster_url
+                featured.backdrop_url ||
+                featured.poster_url
               )}')"
             >
               <div class="hero-content">
-                <p>${escapeHTML(category.toUpperCase())}</p>
-                <h1>${escapeHTML(featured.title)}</h1>
-                <p>${escapeHTML(
-                  String(featured.overview || "").slice(0, 220)
-                )}</p>
-                <button
-                  class="button"
-                  data-open-title="${escapeHTML(featured.slug)}"
-                >
-                  ${icons.play} ကြည့်မည်
-                </button>
+                <p class="hero-kicker">
+                  ${escapeHTML(category.toUpperCase())}
+                </p>
+
+                <h1>
+                  ${escapeHTML(featured.title)}
+                </h1>
+
+                <p class="hero-overview">
+                  ${escapeHTML(featured.overview || "")}
+                </p>
+
+                <div class="hero-actions">
+                  <button
+                    class="button"
+                    data-open-title="${escapeHTML(
+                      featured.slug
+                    )}"
+                  >
+                    ${icons.play}
+                    ကြည့်မည်
+                  </button>
+                </div>
               </div>
             </section>
           `
           : ""
       }
 
-      <section>
+      <section class="catalog-section">
         <div class="section-header">
-          <h2>${escapeHTML(category.toUpperCase())}</h2>
+          <h2>
+            ${escapeHTML(category.toUpperCase())}
+          </h2>
+
           <input
             id="movieSearch"
             class="search-input"
             placeholder="ဇာတ်ကားရှာရန်…"
+            autocomplete="off"
           >
         </div>
 
+        ${
+          genres.length
+            ? `
+              <div
+                id="genreFilter"
+                class="genre-filter"
+                aria-label="Genre filters"
+              >
+                <button
+                  type="button"
+                  class="genre-chip active"
+                  data-genre="all"
+                >
+                  All
+                </button>
+
+                ${genres.map(genre => `
+                  <button
+                    type="button"
+                    class="genre-chip"
+                    data-genre="${escapeHTML(genre)}"
+                  >
+                    ${escapeHTML(genre)}
+                  </button>
+                `).join("")}
+              </div>
+            `
+            : ""
+        }
+
         <div id="movieGrid" class="movie-grid">
-          ${items.map(movieCard).join("")}
+          ${renderMovieItems(currentItems)}
         </div>
       </section>
     `;
 
-    document.querySelector("#movieSearch")
-      ?.addEventListener("input", debounce(async event => {
-        const q = event.target.value.trim();
-        const result = await api(
-          `titles?category=${encodeURIComponent(category)}&q=${encodeURIComponent(q)}`
-        );
+    const movieGrid =
+      document.querySelector("#movieGrid");
 
-        document.querySelector("#movieGrid").innerHTML =
-          result.items.length
-            ? result.items.map(movieCard).join("")
-            : `<section class="empty-card full">မတွေ့ပါ</section>`;
-      }, 350));
+    const paintGrid = () => {
+      const filtered =
+        activeGenre === "all"
+          ? currentItems
+          : currentItems.filter(item =>
+              splitGenres(item.genres)
+                .some(genre =>
+                  genre.toLowerCase() ===
+                  activeGenre.toLowerCase()
+                )
+            );
+
+      movieGrid.innerHTML =
+        renderMovieItems(filtered);
+    };
+
+    document
+      .querySelector("#genreFilter")
+      ?.addEventListener("click", event => {
+        const button =
+          event.target.closest("[data-genre]");
+
+        if (!button) {
+          return;
+        }
+
+        activeGenre = button.dataset.genre;
+
+        document
+          .querySelectorAll("[data-genre]")
+          .forEach(item => {
+            item.classList.toggle(
+              "active",
+              item === button
+            );
+          });
+
+        paintGrid();
+      });
+
+    document
+      .querySelector("#movieSearch")
+      ?.addEventListener(
+        "input",
+        debounce(async event => {
+          const q = event.target.value.trim();
+
+          try {
+            const result = await api(
+              `titles?category=${encodeURIComponent(category)}` +
+              `&q=${encodeURIComponent(q)}`
+            );
+
+            currentItems = result.items || [];
+            paintGrid();
+          } catch (error) {
+            movieGrid.innerHTML = `
+              <section class="empty-card full">
+                ${escapeHTML(error.message)}
+              </section>
+            `;
+          }
+        }, 350)
+      );
   } catch (error) {
-    app.innerHTML = `<section class="empty-card">${escapeHTML(error.message)}</section>`;
+    app.innerHTML = `
+      <section class="empty-card">
+        ${escapeHTML(error.message)}
+      </section>
+    `;
   }
 }
+
 
 function movieCard(item) {
   return `
@@ -254,37 +404,80 @@ function movieCard(item) {
 }
 
 async function renderDetail(slug) {
-  app.innerHTML = `<section class="loading-card">Loading…</section>`;
+  app.innerHTML = `
+    <section class="loading-card">
+      Loading…
+    </section>
+  `;
 
   try {
-    const data = await api(`titles/${encodeURIComponent(slug)}`);
+    const data = await api(
+      `titles/${encodeURIComponent(slug)}`
+    );
+
     const item = data.item;
     const episodes = item.episodes || [];
+    const cast = item.cast || [];
+    const genres = splitGenres(item.genres);
 
     app.innerHTML = `
       <section
         class="detail-hero"
         style="--backdrop:url('${escapeHTML(
-          item.backdrop_url || item.poster_url
+          item.backdrop_url ||
+          item.poster_url ||
+          ""
         )}')"
       >
         <div class="detail-content">
-          <img
-            class="detail-poster"
-            src="${escapeHTML(item.poster_url)}"
-            alt="${escapeHTML(item.title)}"
-          >
+          ${
+            item.poster_url
+              ? `
+                <img
+                  class="detail-poster"
+                  src="${escapeHTML(item.poster_url)}"
+                  alt="${escapeHTML(item.title)}"
+                >
+              `
+              : `
+                <div class="detail-poster poster-placeholder">
+                  No poster
+                </div>
+              `
+          }
 
-          <div>
+          <div class="detail-main">
+            <p class="detail-label">
+              ${
+                item.category === "series"
+                  ? "SERIES"
+                  : item.category === "lugyi"
+                    ? "18+"
+                    : "MOVIE"
+              }
+            </p>
+
             <h1>${escapeHTML(item.title)}</h1>
 
             <div class="meta">
-              <span>${escapeHTML(item.year || "—")}</span>
-              <span>★ ${Number(item.rating || 0).toFixed(1)}</span>
-              <span>${escapeHTML(item.category)}</span>
-            </div>
+              <span>
+                ${escapeHTML(item.year || "—")}
+              </span>
 
-            <p>${escapeHTML(item.overview || "")}</p>
+              <span>
+                ★ ${Number(item.rating || 0).toFixed(1)}
+              </span>
+
+              ${
+                genres.length
+                  ? `
+                    <span>
+                      ${escapeHTML(genres.slice(0, 2).join(" · "))}
+                    </span>
+                  `
+                  : ""
+              }
+            </div>
 
             <div class="detail-actions">
               ${
@@ -293,13 +486,24 @@ async function renderDetail(slug) {
                     <button
                       class="button"
                       data-play-url="${escapeHTML(item.video_url)}"
-                      data-play-type="${escapeHTML(item.video_type)}"
+                      data-play-type="${escapeHTML(
+                        item.video_type || "auto"
+                      )}"
                       data-play-name="${escapeHTML(item.title)}"
                     >
-                      ${icons.play} Play
+                      ${icons.play}
+                      Play
                     </button>
                   `
-                  : ""
+                  : `
+                    <button
+                      class="button"
+                      type="button"
+                      disabled
+                    >
+                      Video မရှိသေးပါ
+                    </button>
+                  `
               }
 
               ${
@@ -309,39 +513,133 @@ async function renderDetail(slug) {
                       class="button secondary"
                       data-favorite="${escapeHTML(item.id)}"
                     >
-                      ${icons.heart} Favorite
+                      ${icons.heart}
+                      Favorite
                     </button>
                   `
                   : ""
               }
             </div>
           </div>
+
+          <div class="detail-overview">
+            <h2>ဇာတ်လမ်းအကျဉ်း</h2>
+
+            <p>
+              ${escapeHTML(
+                item.overview ||
+                "ဇာတ်လမ်းအကျဉ်း မရှိသေးပါ။"
+              )}
+            </p>
+          </div>
         </div>
       </section>
 
       ${
+        genres.length
+          ? `
+            <section class="detail-section">
+              <div class="detail-section-heading">
+                <h2>Genres</h2>
+              </div>
+
+              <div class="detail-genres">
+                ${genres.map(genre => `
+                  <span class="genre-chip static">
+                    ${escapeHTML(genre)}
+                  </span>
+                `).join("")}
+              </div>
+            </section>
+          `
+          : ""
+      }
+
+      ${
+        cast.length
+          ? `
+            <section class="detail-section">
+              <div class="detail-section-heading">
+                <h2>ဇာတ်ဆောင်များ</h2>
+              </div>
+
+              <div class="cast-scroll">
+                ${cast.map(person => `
+                  <article class="cast-card">
+                    ${
+                      person.profile_url
+                        ? `
+                          <img
+                            src="${escapeHTML(
+                              person.profile_url
+                            )}"
+                            alt="${escapeHTML(person.name)}"
+                            loading="lazy"
+                          >
+                        `
+                        : `
+                          <div class="cast-placeholder">
+                            ${escapeHTML(
+                              String(person.name || "?")
+                                .charAt(0)
+                                .toUpperCase()
+                            )}
+                          </div>
+                        `
+                    }
+
+                    <strong>
+                      ${escapeHTML(person.name)}
+                    </strong>
+
+                    <span>
+                      ${escapeHTML(
+                        person.character ||
+                        "Cast"
+                      )}
+                    </span>
+                  </article>
+                `).join("")}
+              </div>
+            </section>
+          `
+          : ""
+      }
+
+      ${
         episodes.length
           ? `
-            <section class="episode-section">
-              <h2>Episodes</h2>
+            <section class="episode-section detail-section">
+              <div class="detail-section-heading">
+                <h2>Episodes</h2>
+              </div>
 
               <div class="episode-scroll">
                 ${episodes.map(episode => `
                   <button
                     class="episode-button"
-                    data-play-url="${escapeHTML(episode.video_url)}"
-                    data-play-type="${escapeHTML(episode.video_type)}"
+                    data-play-url="${escapeHTML(
+                      episode.video_url
+                    )}"
+                    data-play-type="${escapeHTML(
+                      episode.video_type
+                    )}"
                     data-play-name="${escapeHTML(
-                      `S${episode.season_number} E${episode.episode_number} ${episode.episode_title || ""}`
+                      `S${episode.season_number} ` +
+                      `E${episode.episode_number} ` +
+                      `${episode.episode_title || ""}`
                     )}"
                   >
                     <strong>
                       S${episode.season_number}
                       E${episode.episode_number}
                     </strong>
-                    <br>
+
                     <span class="muted">
-                      ${escapeHTML(episode.episode_title || "Episode")}
+                      ${escapeHTML(
+                        episode.episode_title ||
+                        "Episode"
+                      )}
                     </span>
                   </button>
                 `).join("")}
@@ -352,9 +650,14 @@ async function renderDetail(slug) {
       }
     `;
   } catch (error) {
-    app.innerHTML = `<section class="empty-card">${escapeHTML(error.message)}</section>`;
+    app.innerHTML = `
+      <section class="empty-card">
+        ${escapeHTML(error.message)}
+      </section>
+    `;
   }
 }
+
 
 async function renderFavorites() {
   if (!state.user) {
@@ -499,21 +802,55 @@ function playVideo(url, type = "auto", name = "") {
 
   const isHLS =
     type === "m3u8" ||
-    (type === "auto" && /\.m3u8($|\?)/i.test(url));
+    (
+      type === "auto" &&
+      /\.m3u8($|\?)/i.test(url)
+    );
 
-  playerTitle.textContent = name || "CMFLIX";
+  playerTitle.textContent =
+    name || "CMFLIX";
 
   if (isHLS) {
-    if (player.canPlayType("application/vnd.apple.mpegurl")) {
+    if (
+      player.canPlayType(
+        "application/vnd.apple.mpegurl"
+      )
+    ) {
       player.src = url;
     } else if (window.Hls?.isSupported()) {
       state.hls = new window.Hls({
         enableWorker: true,
-        lowLatencyMode: true
+        lowLatencyMode: false,
+        backBufferLength: 30
       });
 
       state.hls.loadSource(url);
       state.hls.attachMedia(player);
+
+      state.hls.on(
+        window.Hls.Events.ERROR,
+        (_event, data) => {
+          if (!data.fatal) {
+            return;
+          }
+
+          if (
+            data.type ===
+            window.Hls.ErrorTypes.NETWORK_ERROR
+          ) {
+            state.hls.startLoad();
+          } else if (
+            data.type ===
+            window.Hls.ErrorTypes.MEDIA_ERROR
+          ) {
+            state.hls.recoverMediaError();
+          } else {
+            toast("Video ဖွင့်၍မရပါ");
+            state.hls.destroy();
+            state.hls = null;
+          }
+        }
+      );
     } else {
       toast("ဤ browser သည် HLS မထောက်ပံ့ပါ");
       return;
@@ -522,9 +859,52 @@ function playVideo(url, type = "auto", name = "") {
     player.src = url;
   }
 
-  playerDialog.showModal();
-  player.play().catch(() => {});
+  if (!playerDialog.open) {
+    playerDialog.showModal();
+  }
+
+  player.play().catch(() => {
+    // Browser autoplay policy ကြောင့် block ဖြစ်ရင်
+    // user က native play button ကိုနှိပ်နိုင်ပါတယ်။
+  });
+
+  /*
+   * Android browser မှာ Play button နှိပ်မှုအတွင်း
+   * native fullscreen ဝင်ရန်ကြိုးစားမယ်။
+   *
+   * Browser ကခွင့်မပြုရင် CSS full-screen player
+   * အဖြစ်ဆက်ပြပါမယ်။
+   */
+  const isMobile =
+    window.matchMedia("(max-width: 760px)").matches;
+
+  if (isMobile) {
+    if (
+      typeof player.webkitEnterFullscreen ===
+      "function"
+    ) {
+      try {
+        player.webkitEnterFullscreen();
+      } catch {
+        // iPhone မှာ metadata မရသေးလျှင်
+        // CSS full-screen dialog ကို fallback သုံးမယ်။
+      }
+    } else if (
+      typeof player.requestFullscreen ===
+      "function"
+    ) {
+      player
+        .requestFullscreen({
+          navigationUI: "hide"
+        })
+        .catch(() => {
+          // Fullscreen permission မရရင်
+          // CSS full-screen dialog ကို fallback သုံးမယ်။
+        });
+    }
+  }
 }
+
 
 function parseEpisodes(text) {
   const input = String(text || "").trim();
