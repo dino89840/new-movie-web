@@ -1467,305 +1467,12 @@ async function searchTMDB() {
 
 
 /*
- * Movie website backend ကနေ TMDB image ကို download လုပ်မယ်။
- * Browser က TMDB ကို တိုက်ရိုက် fetch မလုပ်ဘဲ
- * same-origin admin proxy ကို သုံးထားပါတယ်။
- */
-async function downloadTMDBImage(imageURL) {
-  if (!imageURL) {
-    return null;
-  }
-
-  const response = await fetch(
-    `/api/admin/images/proxy?url=${
-      encodeURIComponent(imageURL)
-    }`,
-    {
-      method: "GET",
-      credentials: "same-origin",
-      headers: {
-        accept:
-          "image/avif,image/webp,image/jpeg,image/png,image/*"
-      }
-    }
-  );
-
-  if (!response.ok) {
-    const result =
-      await response.json().catch(() => ({}));
-
-    throw new Error(
-      result.error ||
-      `TMDB image download failed: ${response.status}`
-    );
-  }
-
-  const contentType =
-    response.headers.get("content-type") || "";
-
-  if (!contentType.startsWith("image/")) {
-    throw new Error(
-      "TMDB က image မဟုတ်တဲ့ response ပြန်ပေးနေပါတယ်"
-    );
-  }
-
-  return response.blob();
-}
-
-
-/*
- * Blob ကို browser canvas သုံးပြီး WEBP ပြောင်း/ချုံ့မယ်။
+ * TMDB image ကို browser မှာ decode/compress မလုပ်တော့ပါ။
  *
- * Poster   : အများဆုံး width 1000px
- * Backdrop : အများဆုံး width 1920px
- */
-async function compressTMDBImage(
-  sourceBlob,
-  kind
-) {
-  if (!sourceBlob) {
-    return null;
-  }
-
-  const maximumWidth =
-    kind === "backdrop"
-      ? 1920
-      : 1000;
-
-  const quality =
-    kind === "backdrop"
-      ? 0.78
-      : 0.82;
-
-  const objectURL =
-    URL.createObjectURL(sourceBlob);
-
-  try {
-    const image =
-      await loadImageElement(objectURL);
-
-    let width =
-      image.naturalWidth || image.width;
-
-    let height =
-      image.naturalHeight || image.height;
-
-    if (!width || !height) {
-      throw new Error(
-        "Image dimension ဖတ်၍မရပါ"
-      );
-    }
-
-    if (width > maximumWidth) {
-      const ratio =
-        maximumWidth / width;
-
-      width =
-        Math.round(width * ratio);
-
-      height =
-        Math.round(height * ratio);
-    }
-
-    const canvas =
-      document.createElement("canvas");
-
-    canvas.width = width;
-    canvas.height = height;
-
-    const context =
-      canvas.getContext("2d", {
-        alpha: false
-      });
-
-    if (!context) {
-      throw new Error(
-        "Image compressor စတင်၍မရပါ"
-      );
-    }
-
-    /*
-     * Transparent PNG ဖြစ်ခဲ့ရင် အနက်ရောင်မဖြစ်အောင်
-     * အရင် background ဖြည့်ထားပါတယ်။
-     */
-    context.fillStyle = "#000000";
-    context.fillRect(
-      0,
-      0,
-      width,
-      height
-    );
-
-    context.drawImage(
-      image,
-      0,
-      0,
-      width,
-      height
-    );
-
-    const compressedBlob =
-      await canvasToBlob(
-        canvas,
-        "image/webp",
-        quality
-      );
-
-    if (!compressedBlob) {
-      throw new Error(
-        "Image compression မအောင်မြင်ပါ"
-      );
-    }
-
-    /*
-     * WEBP ပြောင်းပြီး size ပိုကြီးသွားရင်
-     * source image ကိုပဲ သုံးပါမယ်။
-     */
-    if (
-      compressedBlob.size >= sourceBlob.size &&
-      [
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/avif"
-      ].includes(sourceBlob.type)
-    ) {
-      return new File(
-        [sourceBlob],
-        `${kind}.${extensionFromMime(sourceBlob.type)}`,
-        {
-          type:
-            sourceBlob.type ||
-            "image/jpeg"
-        }
-      );
-    }
-
-    return new File(
-      [compressedBlob],
-      `${kind}.webp`,
-      {
-        type: "image/webp"
-      }
-    );
-  } finally {
-    URL.revokeObjectURL(objectURL);
-  }
-}
-
-
-function loadImageElement(objectURL) {
-  return new Promise(
-    (resolve, reject) => {
-      const image =
-        new Image();
-
-      image.onload = () =>
-        resolve(image);
-
-      image.onerror = () =>
-        reject(
-          new Error(
-            "TMDB image ဖတ်၍မရပါ"
-          )
-        );
-
-      image.src = objectURL;
-    }
-  );
-}
-
-
-function canvasToBlob(
-  canvas,
-  mimeType,
-  quality
-) {
-  return new Promise(
-    (resolve, reject) => {
-      canvas.toBlob(
-        blob => {
-          if (!blob) {
-            reject(
-              new Error(
-                "Image compression မအောင်မြင်ပါ"
-              )
-            );
-
-            return;
-          }
-
-          resolve(blob);
-        },
-        mimeType,
-        quality
-      );
-    }
-  );
-}
-
-
-function extensionFromMime(mimeType) {
-  const extensions = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-    "image/avif": "avif"
-  };
-
-  return extensions[mimeType] || "jpg";
-}
-
-
-/*
- * ချုံ့ပြီးသား image file ကို movie backend ဆီပို့မယ်။
- * Movie backend က IMPORT_API_KEY ထည့်ပြီး
- * external R2 uploader ဆီ ဆက်ပို့ပေးပါမယ်။
- */
-async function uploadImageToR2(
-  file,
-  kind
-) {
-  const formData =
-    new FormData();
-
-  formData.append(
-    "file",
-    file,
-    file.name
-  );
-
-  formData.append(
-    "kind",
-    kind
-  );
-
-  const result =
-    await api(
-      "admin/images/upload",
-      {
-        method: "POST",
-        body: formData
-      }
-    );
-
-  if (!result.url) {
-    throw new Error(
-      `${kind} R2 URL မရရှိပါ`
-    );
-  }
-
-  return result.url;
-}
-
-
-/*
- * TMDB URL တစ်ခုကို—
- *
- * 1. Movie backend proxy ဖြင့် download
- * 2. Browser မှာ compress
- * 3. Image uploader API မှတစ်ဆင့် R2 upload
- * 4. R2 public URL ပြန်ယူ
+ * Movie backend က—
+ * 1. TMDB image ကိုတိုက်ရိုက် download လုပ်မယ်
+ * 2. Image uploader private API ဆီပို့မယ်
+ * 3. R2 public URL ကို browser ဆီပြန်ပေးမယ်
  */
 async function importTMDBImage(
   imageURL,
@@ -1775,28 +1482,31 @@ async function importTMDBImage(
     return "";
   }
 
-  const originalBlob =
-    await downloadTMDBImage(imageURL);
-
-  const compressedFile =
-    await compressTMDBImage(
-      originalBlob,
-      kind
-    );
-
-  return uploadImageToR2(
-    compressedFile,
-    kind
+  const result = await api(
+    "admin/images/upload",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        url: imageURL,
+        kind
+      })
+    }
   );
+
+  if (!result.url) {
+    throw new Error(
+      `${kind} R2 URL ပြန်မရပါ`
+    );
+  }
+
+  return result.url;
 }
 
 
 /*
- * TMDB result ကိုရွေးချယ်လိုက်တာနဲ့
- * poster/backdrop နှစ်ပုံလုံး R2 ပေါ်တင်ပြီးမှ
- * form ထဲ ဖြည့်ပါမယ်။
- *
- * Upload fail ဖြစ်ရင် TMDB URL ကို form ထဲ မဖြည့်ပါ။
+ * TMDB result ကိုရွေးသောအခါ
+ * poster/backdrop ကို R2 သို့တင်ပြီး
+ * ရရှိလာသော R2 URL များကို form ထဲဖြည့်မယ်။
  */
 async function fillTMDB(item) {
   const form =
@@ -1809,7 +1519,7 @@ async function fillTMDB(item) {
   }
 
   toast(
-    "TMDB ပုံများကို download/ချုံ့/R2 upload လုပ်နေပါသည်…"
+    "TMDB ပုံများကို R2 ပေါ်တင်နေပါသည်…"
   );
 
   const [
@@ -1827,10 +1537,6 @@ async function fillTMDB(item) {
     )
   ]);
 
-  /*
-   * TMDB image URL ကို form ထဲမသိမ်းဘဲ
-   * R2 URL ဖြင့် အစားထိုးထားပါတယ်။
-   */
   const importedItem = {
     ...item,
     poster_url: posterURL,
@@ -1847,14 +1553,18 @@ async function fillTMDB(item) {
     }
   }
 
-  document
-    .querySelector("#tmdbResults")
-    .innerHTML = "";
+  const resultsElement =
+    document.querySelector("#tmdbResults");
+
+  if (resultsElement) {
+    resultsElement.innerHTML = "";
+  }
 
   toast(
-    "TMDB ပုံများကို R2 ပေါ်တင်ပြီး form ထဲဖြည့်ပြီးပါပြီ"
+    "TMDB data နှင့် R2 ပုံ URL များ ဖြည့်ပြီးပါပြီ"
   );
 }
+
 
 
 async function saveTitle(event) {
