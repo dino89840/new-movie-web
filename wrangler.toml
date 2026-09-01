@@ -5,7 +5,7 @@ pages_build_output_dir = "public"
 [[d1_databases]]
 binding = "DB"
 database_name = "cmflix-db"
-database_id = "YOUR_D1_DATABASE_ID"
+database_id = "dea653cf-63d7-4c2f-af32-49a7eb3f9b31"
 
 [vars]
 APP_NAME = "CMFLIX"
