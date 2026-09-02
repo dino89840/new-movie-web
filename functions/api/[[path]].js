@@ -17,6 +17,10 @@ export async function onRequest(context) {
     if (path === "status" && method === "GET") {
       return getStatus(env);
     }
+    if (path === "bootstrap" && method === "GET") {
+  return bootstrap(request, env);
+}
+
 
     /*
      * TMDB image proxy
@@ -689,6 +693,51 @@ async function getStatus(env) {
         "CMFLIX ကို ခေတ္တပြုပြင်နေပါသည်။"
       ),
       turnstileSiteKey: env.TURNSTILE_SITE_KEY || ""
+    },
+    200,
+    {
+      "cache-control": "no-store"
+    }
+  );
+}
+async function bootstrap(request, env) {
+  const settingsResult = await env.DB.prepare(
+    `SELECT setting_key, setting_value
+     FROM settings
+     WHERE setting_key IN (
+       'maintenance_mode',
+       'maintenance_message'
+     )`
+  ).all();
+
+  const settings = Object.fromEntries(
+    (settingsResult.results || []).map(row => [
+      row.setting_key,
+      row.setting_value
+    ])
+  );
+
+  /*
+   * Cookie မရှိတဲ့ anonymous visitor အတွက်
+   * session D1 query မလုပ်ပါ။
+   */
+  const cookies = parseCookies(request);
+  const auth = cookies[SESSION_COOKIE]
+    ? await getAuth(request, env)
+    : null;
+
+  return json(
+    {
+      appName: env.APP_NAME || "CMFLIX",
+      maintenance:
+        settings.maintenance_mode === "1",
+      message:
+        settings.maintenance_message ||
+        "CMFLIX ကို ခေတ္တပြုပြင်နေပါသည်။",
+      turnstileSiteKey:
+        env.TURNSTILE_SITE_KEY || "",
+      user: auth?.user || null,
+      csrf: auth?.csrf || ""
     },
     200,
     {
