@@ -18,6 +18,23 @@ export async function onRequest(context) {
       return getStatus(env);
     }
 
+    /*
+     * TMDB image proxy
+     *
+     * Browser က image.tmdb.org ကို တိုက်ရိုက်မခေါ်တော့ဘဲ
+     * ကိုယ့် website ရဲ့ /api/tmdb-image/... ကနေ ပုံယူပါမယ်။
+     */
+    if (
+      path.startsWith("tmdb-image/") &&
+      method === "GET"
+    ) {
+      return proxyTMDBImage(
+        request,
+        context,
+        path.slice("tmdb-image/".length)
+      );
+    }
+
     if (path === "setup" && method === "POST") {
       return setupAdmin(request, env);
     }
@@ -679,6 +696,222 @@ async function getStatus(env) {
     }
   );
 }
+
+/* -------------------- TMDB image proxy -------------------- */
+
+/*
+ * App/database ထဲက TMDB image URL ကို
+ * same-origin proxy URL အဖြစ် ပြောင်းပေးပါတယ်။
+ *
+ * Custom poster URL တွေကိုတော့ မပြောင်းပါ။
+ */
+function proxiedTMDBImageURL(value, preferredSize = "w500") {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return "";
+  }
+
+  /*
+   * Proxy URL ဖြစ်ပြီးသားဆို ထပ်မပြောင်းပါ။
+   */
+  if (raw.startsWith("/api/tmdb-image/")) {
+    return raw;
+  }
+
+  let parsed;
+
+  try {
+    parsed = new URL(raw);
+  } catch {
+    /*
+     * Local/custom relative URL ဖြစ်နိုင်တဲ့အတွက်
+     * မပြောင်းဘဲ မူရင်းကိုပဲပြန်ပေးပါမယ်။
+     */
+    return raw;
+  }
+
+  if (parsed.hostname.toLowerCase() !== "image.tmdb.org") {
+    return raw;
+  }
+
+  const match = parsed.pathname.match(
+    /^\/t\/p\/[^/]+\/(.+)$/
+  );
+
+  if (!match) {
+    return raw;
+  }
+
+  const filePath = match[1]
+    .split("/")
+    .filter(Boolean)
+    .map(part => encodeURIComponent(part))
+    .join("/");
+
+  if (!filePath) {
+    return "";
+  }
+
+  return (
+    `/api/tmdb-image/` +
+    `${encodeURIComponent(preferredSize)}/` +
+    filePath
+  );
+}
+
+/*
+ * /api/tmdb-image/{size}/{file}
+ *
+ * ဥပမာ:
+ * /api/tmdb-image/w500/abc123.jpg
+ * /api/tmdb-image/original/abc123.jpg
+ */
+async function proxyTMDBImage(
+  request,
+  context,
+  rawImagePath
+) {
+  let decodedPath;
+
+  try {
+    decodedPath = decodeURIComponent(
+      String(rawImagePath || "")
+    );
+  } catch {
+    return json({ error: "Image path မမှန်ပါ" }, 400);
+  }
+
+  const parts = decodedPath
+    .split("/")
+    .filter(Boolean);
+
+  const size = parts.shift() || "";
+  const filePath = parts.join("/");
+
+  /*
+   * TMDB မှာ အသုံးများတဲ့ size တွေကိုသာ ခွင့်ပြုပါတယ်။
+   * ဒီ validation ကြောင့် endpoint ကို open proxy
+   * အဖြစ် အသုံးချလို့မရပါ။
+   */
+  const allowedSizes = new Set([
+    "original",
+    "w92",
+    "w154",
+    "w185",
+    "w300",
+    "w342",
+    "w500",
+    "w780",
+    "w1280"
+  ]);
+
+  if (!allowedSizes.has(size)) {
+    return json({ error: "Image size မမှန်ပါ" }, 400);
+  }
+
+  if (
+    !filePath ||
+    filePath.includes("..") ||
+    !/^[a-zA-Z0-9._/-]+\.(jpg|jpeg|png|webp)$/i.test(
+      filePath
+    )
+  ) {
+    return json({ error: "Image file မမှန်ပါ" }, 400);
+  }
+
+  const cache = caches.default;
+  const cacheKey = new Request(request.url, {
+    method: "GET"
+  });
+
+  const cachedResponse = await cache.match(cacheKey);
+
+  if (cachedResponse) {
+    return cachedResponse;
+  }
+
+  const safeFilePath = filePath
+    .split("/")
+    .map(part => encodeURIComponent(part))
+    .join("/");
+
+  const upstreamURL =
+    `https://image.tmdb.org/t/p/` +
+    `${encodeURIComponent(size)}/` +
+    safeFilePath;
+
+  let upstreamResponse;
+
+  try {
+    upstreamResponse = await fetch(upstreamURL, {
+      headers: {
+        accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+      },
+      cf: {
+        cacheEverything: true,
+        cacheTtl: 2592000
+      }
+    });
+  } catch (error) {
+    console.error("TMDB image fetch error:", error);
+
+    return json(
+      { error: "TMDB image ယူ၍မရပါ" },
+      502
+    );
+  }
+
+  if (!upstreamResponse.ok) {
+    return json(
+      {
+        error: "TMDB image မတွေ့ပါ",
+        upstreamStatus: upstreamResponse.status
+      },
+      upstreamResponse.status === 404 ? 404 : 502
+    );
+  }
+
+  const contentType =
+    upstreamResponse.headers.get("content-type") || "";
+
+  if (!contentType.startsWith("image/")) {
+    return json(
+      { error: "Upstream response သည် image မဟုတ်ပါ" },
+      502
+    );
+  }
+
+  const headers = new Headers();
+
+  headers.set("content-type", contentType);
+  headers.set(
+    "cache-control",
+    "public, max-age=2592000, s-maxage=2592000, immutable"
+  );
+  headers.set("x-content-type-options", "nosniff");
+
+  const etag = upstreamResponse.headers.get("etag");
+
+  if (etag) {
+    headers.set("etag", etag);
+  }
+
+  const response = new Response(
+    upstreamResponse.body,
+    {
+      status: 200,
+      headers
+    }
+  );
+
+  context.waitUntil(
+    cache.put(cacheKey, response.clone())
+  );
+
+  return response;
+}
+
 /* -------------------- TMDB helpers -------------------- */
 
 async function fetchTMDBDetails(env, tmdbType, tmdbId) {
@@ -733,7 +966,10 @@ async function fetchTMDBDetails(env, tmdbType, tmdbId) {
           name: person.name || person.original_name || "",
           character: person.character || "",
           profile_url: person.profile_path
-            ? `https://image.tmdb.org/t/p/w185${person.profile_path}`
+            ? proxiedTMDBImageURL(
+                `https://image.tmdb.org/t/p/w185${person.profile_path}`,
+                "w185"
+              )
             : ""
         }))
     };
@@ -765,7 +1001,7 @@ async function publicTitles(request, env, context) {
   const cacheURL = new URL(url.toString());
 
   // အဟောင်း cache နဲ့မရောစေရန်
-  cacheURL.searchParams.set("_dataVersion", "2");
+  cacheURL.searchParams.set("_dataVersion", "3");
 
   const cacheKey = new Request(cacheURL.toString(), {
     method: "GET"
@@ -814,22 +1050,30 @@ async function publicTitles(request, env, context) {
    */
   const items = await Promise.all(
     databaseItems.map(async item => {
-      if (
-        String(item.genres || "").trim() ||
-        !item.tmdb_id
-      ) {
-        return item;
-      }
+      let genres =
+        String(item.genres || "").trim();
 
-      const tmdb = await fetchTMDBDetails(
-        env,
-        item.tmdb_type,
-        item.tmdb_id
-      );
+      if (!genres && item.tmdb_id) {
+        const tmdb = await fetchTMDBDetails(
+          env,
+          item.tmdb_type,
+          item.tmdb_id
+        );
+
+        genres = tmdb?.genres || "";
+      }
 
       return {
         ...item,
-        genres: tmdb?.genres || ""
+        genres,
+        poster_url: proxiedTMDBImageURL(
+          item.poster_url,
+          "w500"
+        ),
+        backdrop_url: proxiedTMDBImageURL(
+          item.backdrop_url,
+          "original"
+        )
       };
     })
   );
@@ -860,7 +1104,7 @@ async function publicTitle(request, env, slug, context) {
   const cacheURL = new URL(request.url);
 
   // အဟောင်း cast မပါတဲ့ cache ကိုရှောင်ရန်
-  cacheURL.searchParams.set("_dataVersion", "2");
+  cacheURL.searchParams.set("_dataVersion", "3");
 
   const cacheKey = new Request(cacheURL.toString(), {
     method: "GET"
@@ -911,12 +1155,28 @@ async function publicTitle(request, env, slug, context) {
   const item = {
     ...title,
 
-    // DB ထဲမှာ genre ရှိရင် DB ကိုသုံးမယ်။
-    // မရှိရင် TMDB က genre ကိုသုံးမယ်။
+    /*
+     * Database ထဲမှာ genre ရှိရင် database ကိုသုံးပြီး
+     * မရှိရင် TMDB genre ကိုသုံးပါမယ်။
+     */
     genres:
       String(title.genres || "").trim() ||
       tmdb?.genres ||
       "",
+
+    /*
+     * Database ထဲမှာ မူရင်း TMDB URL ရှိနေသေးရင်လည်း
+     * browser ဆီမပို့ခင် proxy URL ပြောင်းပေးပါမယ်။
+     */
+    poster_url: proxiedTMDBImageURL(
+      title.poster_url,
+      "w500"
+    ),
+
+    backdrop_url: proxiedTMDBImageURL(
+      title.backdrop_url,
+      "original"
+    ),
 
     cast: tmdb?.cast || [],
     episodes: episodes.results || []
@@ -956,7 +1216,15 @@ async function listFavorites(request, env) {
      LIMIT 100`
   ).bind(result.auth.user.id).all();
 
-  return json({ items: rows.results || [] });
+  const items = (rows.results || []).map(item => ({
+    ...item,
+    poster_url: proxiedTMDBImageURL(
+      item.poster_url,
+      "w500"
+    )
+  }));
+
+  return json({ items });
 }
 
 async function addFavorite(request, env, titleId) {
@@ -1135,11 +1403,17 @@ async function tmdbSearch(request, env) {
         overview: item.overview || "",
 
         poster_url: item.poster_path
-          ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
+          ? proxiedTMDBImageURL(
+              `https://image.tmdb.org/t/p/w500${item.poster_path}`,
+              "w500"
+            )
           : "",
 
         backdrop_url: item.backdrop_path
-          ? `https://image.tmdb.org/t/p/original${item.backdrop_path}`
+          ? proxiedTMDBImageURL(
+              `https://image.tmdb.org/t/p/original${item.backdrop_path}`,
+              "original"
+            )
           : "",
 
         release_date: releaseDate,
@@ -1207,8 +1481,20 @@ async function adminTitles(request, env) {
 
   sql += " ORDER BY updated_at DESC LIMIT 100";
 
-  const rows = await env.DB.prepare(sql).bind(...params).all();
-  return json({ items: rows.results || [] });
+  const rows = await env.DB
+    .prepare(sql)
+    .bind(...params)
+    .all();
+
+  const items = (rows.results || []).map(item => ({
+    ...item,
+    poster_url: proxiedTMDBImageURL(
+      item.poster_url,
+      "w500"
+    )
+  }));
+
+  return json({ items });
 }
 
 async function adminGetTitle(request, env, id) {
@@ -1232,6 +1518,14 @@ async function adminGetTitle(request, env, id) {
   return json({
     item: {
       ...title,
+      poster_url: proxiedTMDBImageURL(
+        title.poster_url,
+        "w500"
+      ),
+      backdrop_url: proxiedTMDBImageURL(
+        title.backdrop_url,
+        "original"
+      ),
       episodes: episodes.results || []
     }
   });
