@@ -87,21 +87,23 @@ async function api(path, options = {}) {
 
 async function initialize() {
   try {
-    const [status, auth] = await Promise.all([
-      api("status"),
-      api("auth/me")
-    ]);
+    const bootstrap = await api("bootstrap");
 
-    state.user = auth.user;
-    state.csrf = auth.csrf || "";
+    state.user = bootstrap.user;
+    state.csrf = bootstrap.csrf || "";
 
-    if (status.maintenance && state.user?.role !== "admin") {
-      renderMaintenance(status.message);
+    if (
+      bootstrap.maintenance &&
+      state.user?.role !== "admin"
+    ) {
+      renderMaintenance(bootstrap.message);
       return;
     }
 
     route();
   } catch (error) {
+    console.error("Initialization error:", error);
+
     app.innerHTML = `
       <section class="empty-card">
         ${escapeHTML(error.message)}
