@@ -1549,20 +1549,21 @@ async function adminGetTitle(request, env, id) {
      ORDER BY season_number, episode_number`
   ).bind(id).all();
 
-  return json({
+    return json({
     item: {
       ...title,
       poster_url: proxiedTMDBImageURL(
-  item.poster_url,
-  "w342"
-),
-backdrop_url: proxiedTMDBImageURL(
-  item.backdrop_url,
-  "w780"
-),
+        title.poster_url,
+        "w342"
+      ),
+      backdrop_url: proxiedTMDBImageURL(
+        title.backdrop_url,
+        "w780"
+      ),
       episodes: episodes.results || []
     }
   });
+
 }
 
 function cleanTitleBody(body) {
