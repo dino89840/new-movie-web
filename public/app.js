@@ -530,28 +530,10 @@ async function renderHome(category) {
   );
 
   /*
-   * Button က viewport အနီးရောက်ရင် page အသစ်ယူမယ်။
-   * IntersectionObserver မရတဲ့ browser မှာလည်း
-   * button ကိုယ်တိုင်နှိပ်ပြီး ဆက်ယူနိုင်ပါတယ်။
+   * Cloudflare Free plan request လျှော့ရန်
+   * automatic infinite loading မသုံးတော့ပါ။
+   * User က Load More နှိပ်မှ API request အသစ်လုပ်မယ်။
    */
-  if ("IntersectionObserver" in window) {
-    state.catalogObserver =
-      new IntersectionObserver(
-        entries => {
-          if (entries.some(entry => entry.isIntersecting)) {
-            loadNextPage();
-          }
-        },
-        {
-          root: null,
-          rootMargin: "300px 0px",
-          threshold: 0.01
-        }
-      );
-
-    state.catalogObserver.observe(loadMoreButton);
-  }
-
   paintGrid();
 }
 
@@ -981,18 +963,25 @@ async function renderDetail(slug) {
 }
 
     `;
+
+    /*
+     * HTML ထဲမှာ #episodeBrowser ဖန်တီးပြီးမှ
+     * episode buttons တွေ render လုပ်ရပါမယ်။
+     */
+    if (episodes.length) {
+      setupEpisodeBrowser(episodes);
+    }
   } catch (error) {
+    console.error("Detail page error:", error);
+
     app.innerHTML = `
       <section class="empty-card">
         ${escapeHTML(error.message)}
       </section>
     `;
-    if (episodes.length) {
-  setupEpisodeBrowser(episodes);
-}
-
   }
 }
+
 
 
 async function renderFavorites() {
