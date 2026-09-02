@@ -1496,6 +1496,9 @@ async function renderAdmin() {
           <button id="maintenanceButton" class="button secondary">
             Maintenance
           </button>
+          <button id="publishAllButton" class="button secondary">
+            Publish all drafts
+          </button>
           <button id="newTitleButton" class="button">
             + Add title
           </button>
@@ -1533,12 +1536,36 @@ async function renderAdmin() {
   document.querySelector("#maintenanceButton")
     .addEventListener("click", renderMaintenanceEditor);
 
+  document.querySelector("#publishAllButton")
+    .addEventListener("click", publishAllDrafts);
+
   for (const id of ["adminSearch", "adminStatus", "adminCategory"]) {
     document.querySelector(`#${id}`)
       .addEventListener("input", debounce(loadAdminTitles, 250));
   }
 
   loadAdminTitles();
+}
+
+async function publishAllDrafts() {
+  const accepted = confirm(
+    "Draft ကားအားလုံးကို Public ပြောင်းမှာ သေချာပါသလား?"
+  );
+
+  if (!accepted) {
+    return;
+  }
+
+  try {
+    const result = await api("admin/titles/publish-all", {
+      method: "POST"
+    });
+
+    toast(`${result.published} ကား Public လုပ်ပြီးပါပြီ`);
+    loadAdminTitles();
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
 async function loadAdminTitles() {
