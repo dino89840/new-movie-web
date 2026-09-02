@@ -1728,6 +1728,30 @@ function debounce(callback, delay) {
     timer = setTimeout(() => callback(...args), delay);
   };
 }
+function isProtectedMedia(target) {
+  return target instanceof Element &&
+    Boolean(
+      target.closest(
+        ".poster-wrap, " +
+        ".detail-poster, " +
+        ".cast-card img, " +
+        ".hero, " +
+        ".detail-hero"
+      )
+    );
+}
+
+document.addEventListener("contextmenu", event => {
+  if (isProtectedMedia(event.target)) {
+    event.preventDefault();
+  }
+});
+
+document.addEventListener("dragstart", event => {
+  if (isProtectedMedia(event.target)) {
+    event.preventDefault();
+  }
+});
 
 /* -------------------- Global events -------------------- */
 
@@ -1873,6 +1897,30 @@ authContent.addEventListener("click", async event => {
     } catch (error) {
       toast(error.message);
     }
+  }
+});
+function isProtectedMedia(target) {
+  return target instanceof Element &&
+    Boolean(
+      target.closest(
+        ".poster-wrap, " +
+        ".detail-poster, " +
+        ".cast-card img, " +
+        ".hero, " +
+        ".detail-hero"
+      )
+    );
+}
+
+document.addEventListener("contextmenu", event => {
+  if (isProtectedMedia(event.target)) {
+    event.preventDefault();
+  }
+});
+
+document.addEventListener("dragstart", event => {
+  if (isProtectedMedia(event.target)) {
+    event.preventDefault();
   }
 });
 
