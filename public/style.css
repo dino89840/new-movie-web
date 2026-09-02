@@ -1235,3 +1235,319 @@ body {
     max-height: 100dvh;
   }
 }
+/* ======================================================
+   CMFLIX improved player UI
+   ====================================================== */
+
+.player-modal {
+  position: fixed;
+  inset: 0;
+  width: min(1120px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 22px;
+  background: #080a0f;
+  color: white;
+  box-shadow:
+    0 30px 100px rgba(0, 0, 0, .7),
+    0 0 0 1px rgba(255, 255, 255, .03);
+}
+
+.player-modal[open] {
+  display: block;
+}
+
+.player-modal::backdrop {
+  background: rgba(0, 0, 0, .88);
+  backdrop-filter: blur(12px);
+}
+
+.player-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background:
+    radial-gradient(
+      circle at top,
+      rgba(229, 9, 20, .11),
+      transparent 38%
+    ),
+    #080a0f;
+}
+
+.player-header {
+  position: relative;
+  z-index: 4;
+  min-height: 72px;
+  padding: 13px 15px 13px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  background: rgba(8, 10, 15, .94);
+}
+
+.player-heading {
+  min-width: 0;
+}
+
+.player-kicker {
+  display: block;
+  margin-bottom: 3px;
+  color: #ff4b58;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+}
+
+.player-title {
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  color: white;
+  font-size: 16px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.player-action-button {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .07);
+  color: white;
+  cursor: pointer;
+  transition:
+    background .2s ease,
+    border-color .2s ease,
+    transform .2s ease;
+}
+
+.player-action-button:hover {
+  border-color: rgba(255, 255, 255, .26);
+  background: rgba(255, 255, 255, .14);
+  transform: translateY(-1px);
+}
+
+.player-action-button svg {
+  width: 19px;
+  height: 19px;
+}
+
+.player-close {
+  position: static;
+  top: auto;
+  right: auto;
+  z-index: auto;
+  float: none;
+  font-size: 27px;
+  line-height: 1;
+  background: rgba(229, 9, 20, .18);
+}
+
+.player-close:hover {
+  border-color: rgba(229, 9, 20, .7);
+  background: rgba(229, 9, 20, .35);
+}
+
+.player-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at center,
+      #161922,
+      #000 72%
+    );
+}
+
+#videoPlayer {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: calc(100dvh - 105px);
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  border-radius: 0;
+  background: #000;
+}
+
+.player-status {
+  position: absolute;
+  left: 50%;
+  bottom: 74px;
+  z-index: 3;
+  max-width: calc(100% - 40px);
+  padding: 10px 15px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .78);
+  color: rgba(255, 255, 255, .9);
+  font-size: 13px;
+  text-align: center;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, 8px);
+  transition:
+    opacity .2s ease,
+    transform .2s ease,
+    visibility .2s ease;
+  backdrop-filter: blur(8px);
+}
+
+.player-status.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
+#videoPlayer:fullscreen,
+#videoPlayer:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  object-fit: contain;
+  border-radius: 0;
+  background: #000;
+}
+
+@media (max-width: 680px) {
+  .player-modal {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: #000;
+  }
+
+  .player-modal::backdrop {
+    background: #000;
+  }
+
+  .player-shell {
+    width: 100%;
+    height: 100%;
+    justify-content: center;
+    background: #000;
+  }
+
+  .player-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 5;
+    min-height: 68px;
+    padding:
+      max(10px, env(safe-area-inset-top))
+      11px
+      10px
+      15px;
+    border-bottom: 0;
+    background:
+      linear-gradient(
+        rgba(0, 0, 0, .88),
+        transparent
+      );
+  }
+
+  .player-heading {
+    max-width: calc(100vw - 125px);
+  }
+
+  .player-title {
+    position: static;
+    top: auto;
+    left: auto;
+    right: auto;
+    padding: 0;
+    font-size: 14px;
+    text-shadow: 0 2px 8px #000;
+  }
+
+  .player-kicker {
+    font-size: 9px;
+  }
+
+  .player-action-button {
+    width: 39px;
+    height: 39px;
+    background: rgba(0, 0, 0, .58);
+  }
+
+  .player-stage {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+    background: #000;
+  }
+
+  #videoPlayer {
+    width: 100%;
+    height: 100%;
+    max-height: 100dvh;
+    aspect-ratio: auto;
+    object-fit: contain;
+  }
+
+  .player-status {
+    bottom:
+      max(
+        72px,
+        calc(env(safe-area-inset-bottom) + 56px)
+      );
+    font-size: 12px;
+  }
+}
+
+@media (
+  max-width: 920px
+) and (
+  orientation: landscape
+) {
+  .player-header {
+    min-height: 56px;
+    padding-block: 7px;
+  }
+
+  .player-kicker {
+    display: none;
+  }
+
+  .player-action-button {
+    width: 38px;
+    height: 38px;
+  }
+
+  #videoPlayer {
+    max-height: 100dvh;
+  }
+}
