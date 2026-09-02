@@ -1711,3 +1711,111 @@ body {
     width: 100%;
   }
 }
+/* ---------- Season and episode browser ---------- */
+
+.episode-browser {
+  width: 100%;
+  min-width: 0;
+}
+
+.episode-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.season-selector {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.season-selector span,
+.episode-count {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.season-selector select {
+  min-width: 135px;
+  padding: 10px 35px 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--panel);
+  color: white;
+}
+
+.episode-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.episode-grid .episode-button {
+  width: 100%;
+  min-width: 0;
+  min-height: 76px;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  text-align: left;
+}
+
+.episode-grid .episode-button strong,
+.episode-grid .episode-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.episode-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.episode-pagination button:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 820px) {
+  .episode-grid {
+    grid-template-columns:
+      repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .episode-grid {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .episode-grid .episode-button {
+    min-height: 70px;
+    padding: 10px;
+    font-size: 12px;
+  }
+
+  .episode-toolbar {
+    align-items: stretch;
+  }
+
+  .season-selector {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .season-selector select {
+    flex: 1;
+  }
+}
