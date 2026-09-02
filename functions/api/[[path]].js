@@ -1172,8 +1172,13 @@ const offset = (page - 1) * limit;
     },
     200,
     {
+      /*
+       * Browser တွင် 5 minutes သိမ်းထားမယ်။
+       * တူညီတဲ့ category/search/page ကို ပြန်ဖွင့်ရင်
+       * Worker request ထပ်မပို့နိုင်အောင် လျှော့ပေးတယ်။
+       */
       "cache-control":
-        "public, max-age=30, s-maxage=300, stale-while-revalidate=600"
+        "public, max-age=300, s-maxage=300, stale-while-revalidate=600"
     }
   );
 
@@ -1276,8 +1281,12 @@ async function publicTitle(
     { item },
     200,
     {
+      /*
+       * ကြည့်ပြီးသား detail page ကို 5 minutes အတွင်း
+       * ပြန်ဖွင့်ရင် browser cache ကနေယူနိုင်ပါတယ်။
+       */
       "cache-control":
-        "public, max-age=30, " +
+        "public, max-age=300, " +
         "s-maxage=300, " +
         "stale-while-revalidate=600"
     }
