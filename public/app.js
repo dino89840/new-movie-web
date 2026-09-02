@@ -153,6 +153,40 @@ function updateBottomNavigation(page) {
     });
 }
 
+/*
+ * Hash route ပြောင်းတဲ့အခါ browser က အရင် scroll position ကို
+ * ဆက်သုံးတာ/ပြန်ယူတာ မဖြစ်အောင် manual လုပ်ထားမယ်။
+ */
+if ("scrollRestoration" in window.history) {
+  window.history.scrollRestoration = "manual";
+}
+
+/*
+ * Android browser အပါအဝင် browser အမျိုးမျိုးမှာ
+ * detail page ကို ထိပ်ဆုံးကနေ သေချာပြစေရန် scroll position ကို reset လုပ်မယ်။
+ *
+ * requestAnimationFrame နှစ်ဆင့်သုံးထားတာက
+ * DOM render/layout ပြီးတဲ့နောက်လည်း ထပ်ပြီး ထိပ်ဆုံးထားနိုင်ဖို့ ဖြစ်တယ်။
+ */
+function resetPageScroll() {
+  const scrollToTop = () => {
+    window.scrollTo(0, 0);
+
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  };
+
+  scrollToTop();
+
+  requestAnimationFrame(() => {
+    scrollToTop();
+
+    requestAnimationFrame(() => {
+      scrollToTop();
+    });
+  });
+}
+
 function route() {
   const hash = location.hash || "#/movies";
   const parts = hash.slice(2).split("/").filter(Boolean);
@@ -193,6 +227,13 @@ function route() {
 
   if (page === "watch" && parts[1]) {
     updateBottomNavigation("watch");
+
+    /*
+     * Movie/Series detail page ဝင်တာနဲ့
+     * အရင် page ရဲ့ scroll position ကို မယူဘဲ
+     * ချက်ချင်း ထိပ်ဆုံးပြမယ်။
+     */
+    resetPageScroll();
 
     renderDetail(
       decodeURIComponent(parts[1])
@@ -990,6 +1031,12 @@ async function renderDetail(slug) {
     if (episodes.length) {
       setupEpisodeBrowser(episodes);
     }
+
+    /*
+     * API data ရပြီး detail cover/poster ကို DOM ထဲထည့်ပြီးနောက်
+     * layout ပြောင်းသွားနိုင်တာကြောင့် scroll ကို ထပ် reset လုပ်မယ်။
+     */
+    resetPageScroll();
   } catch (error) {
     console.error("Detail page error:", error);
 
