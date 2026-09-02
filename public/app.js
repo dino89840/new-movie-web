@@ -224,10 +224,6 @@ async function renderHome(category) {
   currentPage = 1;
   hasMore = Boolean(firstData.hasMore);
 
-  const featured =
-    currentItems.find(item => item.featured) ||
-    currentItems[0];
-
   const genres = [
     ...new Set(
       currentItems.flatMap(item =>
@@ -237,46 +233,6 @@ async function renderHome(category) {
   ].sort((a, b) => a.localeCompare(b));
 
   app.innerHTML = `
-    ${
-      featured
-        ? `
-          <section
-            class="hero protected-media"
-            style="--hero-image:url('${escapeHTML(
-              featured.backdrop_url ||
-              featured.poster_url ||
-              ""
-            )}')"
-          >
-            <div class="hero-content">
-              <p class="hero-kicker">
-                ${escapeHTML(category.toUpperCase())}
-              </p>
-
-              <h1>
-                ${escapeHTML(featured.title)}
-              </h1>
-
-              <p class="hero-overview">${escapeHTML(
-                String(featured.overview || "").trim()
-              )}</p>
-
-              <div class="hero-actions">
-                <button
-                  class="button"
-                  data-open-title="${escapeHTML(
-                    featured.slug
-                  )}"
-                >
-                  ${icons.play}
-                  ကြည့်မည်
-                </button>
-              </div>
-            </div>
-          </section>
-        `
-        : ""
-    }
 
     <section class="catalog-section">
       <div class="section-header">
