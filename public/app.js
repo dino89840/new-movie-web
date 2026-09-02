@@ -527,15 +527,15 @@ async function renderDetail(slug) {
           </div>
 
           <div class="detail-overview">
-            <h2>ဇာတ်လမ်းအကျဉ်း</h2>
+  <h2>ဇာတ်လမ်းအကျဉ်း</h2>
+  <p>${escapeHTML(
+    String(
+      item.overview ||
+      "ဇာတ်လမ်းအကျဉ်း မရှိသေးပါ။"
+    ).trim()
+  )}</p>
+</div>
 
-            <p>
-              ${escapeHTML(
-                item.overview ||
-                "ဇာတ်လမ်းအကျဉ်း မရှိသေးပါ။"
-              )}
-            </p>
-          </div>
         </div>
       </section>
 
@@ -1233,8 +1233,22 @@ async function renderTitleEditor(id = null) {
         ${field("release_date", "Release date", item.release_date)}
         ${field("year", "Year", item.year, false, "number")}
         ${field("rating", "Rating", item.rating, false, "number")}
-        ${field("poster_url", "Poster URL", item.poster_url, false, "url")}
-        ${field("backdrop_url", "Backdrop URL", item.backdrop_url, false, "url")}
+        ${field(
+  "poster_url",
+  "Poster URL or proxy path",
+  item.poster_url,
+  false,
+  "text"
+)}
+
+${field(
+  "backdrop_url",
+  "Backdrop URL or proxy path",
+  item.backdrop_url,
+  false,
+  "text"
+)}
+
         ${field("genres", "Genres", item.genres)}
 
         <label class="field">
@@ -1429,11 +1443,44 @@ async function saveTitle(event) {
   const form = new FormData(event.currentTarget);
   const body = Object.fromEntries(form.entries());
 
-  body.tmdb_id = body.tmdb_id ? Number(body.tmdb_id) : null;
-  body.year = body.year ? Number(body.year) : null;
-  body.rating = Number(body.rating || 0);
-  body.featured = body.featured === "1";
-  body.episodes = state.parsedEpisodes;
+  body.tmdb_id = body.tmdb_id
+  ? Number(body.tmdb_id)
+  : null;
+
+body.year = body.year
+  ? Number(body.year)
+  : null;
+
+body.rating = Number(body.rating || 0);
+body.featured = body.featured === "1";
+body.episodes = state.parsedEpisodes;
+
+body.title = String(body.title || "").trim();
+body.slug = String(body.slug || "").trim();
+body.original_title = String(
+  body.original_title || ""
+).trim();
+
+body.overview = String(
+  body.overview || ""
+).trim();
+
+body.poster_url = String(
+  body.poster_url || ""
+).trim();
+
+body.backdrop_url = String(
+  body.backdrop_url || ""
+).trim();
+
+body.video_url = String(
+  body.video_url || ""
+).trim();
+
+body.genres = String(
+  body.genres || ""
+).trim();
+
 
   try {
     await api(
