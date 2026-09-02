@@ -1605,3 +1605,17 @@ body {
   font-size: 12px;
   text-align: center;
 }
+.poster-wrap img,
+.detail-poster,
+.cast-card img {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.poster-wrap,
+.detail-poster,
+.cast-card img,
+.hero,
+.detail-hero {
+  -webkit-touch-callout: none;
+}
