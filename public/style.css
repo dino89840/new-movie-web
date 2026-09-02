@@ -1628,3 +1628,86 @@ body {
 .detail-hero {
   -webkit-touch-callout: none;
 }
+/* ---------- Editable episode parser ---------- */
+
+.parser-preview {
+  max-height: 520px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.parser-preview-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  background: #11141c;
+}
+
+.parser-list {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.parser-row.editable {
+  display: grid;
+  grid-template-columns:
+    90px
+    90px
+    minmax(220px, 1fr)
+    100px
+    auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.parser-row.editable label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.parser-row.editable label span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.parser-row.editable input,
+.parser-row.editable select {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #0c0f16;
+  color: white;
+}
+
+.parser-empty {
+  padding: 18px;
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 680px) {
+  .parser-row.editable {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .parser-url-field {
+    grid-column: 1 / -1;
+  }
+
+  .parser-delete {
+    width: 100%;
+  }
+}
