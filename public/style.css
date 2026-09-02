@@ -1558,3 +1558,50 @@ body {
   overflow-wrap: anywhere;
   word-break: normal;
 }
+/* Mobile: တစ်တန်း ၃ ကား */
+@media (max-width: 680px) {
+  .movie-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px 7px;
+  }
+
+  .movie-card {
+    min-width: 0;
+  }
+
+  .poster-wrap {
+    border-radius: 9px;
+  }
+
+  .card-badge {
+    top: 5px;
+    left: 5px;
+    padding: 4px 6px;
+    font-size: 8px;
+  }
+
+  .movie-card h3 {
+    margin: 7px 1px 3px;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .movie-card p {
+    margin-inline: 1px;
+    font-size: 9px;
+  }
+}
+
+.catalog-loader {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 28px 0 8px;
+}
+
+.catalog-status {
+  min-height: 20px;
+  margin: 0;
+  font-size: 12px;
+  text-align: center;
+}
