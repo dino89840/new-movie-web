@@ -112,13 +112,63 @@ async function initialize() {
   }
 }
 
+function updateBottomNavigation(page) {
+  let activePage = page;
+
+  /*
+   * Detail/watch page ထဲရောက်သွားရင်
+   * အရင်ဖွင့်ခဲ့တဲ့ Movies, Series သို့မဟုတ် Lugyi ကို
+   * active အဖြစ် ဆက်ပြထားမယ်။
+   */
+  if (page === "watch") {
+    activePage = state.category || "movies";
+  }
+
+  document
+    .querySelectorAll(".bottom-nav-item")
+    .forEach(button => {
+      const buttonPage =
+        button.dataset.category ||
+        button.dataset.page ||
+        "";
+
+      const isActive =
+        buttonPage === activePage;
+
+      button.classList.toggle(
+        "active",
+        isActive
+      );
+
+      if (isActive) {
+        button.setAttribute(
+          "aria-current",
+          "page"
+        );
+      } else {
+        button.removeAttribute(
+          "aria-current"
+        );
+      }
+    });
+}
+
 function route() {
   const hash = location.hash || "#/movies";
   const parts = hash.slice(2).split("/").filter(Boolean);
   const page = parts[0] || "movies";
 
+  /*
+   * URL hash ပြောင်းတိုင်း bottom navigation ရဲ့
+   * active item ကို ပြန်သတ်မှတ်မယ်။
+   */
+  updateBottomNavigation(page);
+
   if (["movies", "series", "lugyi"].includes(page)) {
-    if (page === "lugyi" && !localStorage.getItem("cmflix-adult-ok")) {
+    if (
+      page === "lugyi" &&
+      !localStorage.getItem("cmflix-adult-ok")
+    ) {
       const accepted = confirm(
         "ဤအပိုင်းသည် အသက်ပြည့်ပြီးသူများအတွက် ဖြစ်နိုင်ပါသည်။ " +
         "သင်သည် သက်ဆိုင်ရာ အသက်ကန့်သတ်ချက် ပြည့်မီပါသလား?"
@@ -129,25 +179,36 @@ function route() {
         return;
       }
 
-      localStorage.setItem("cmflix-adult-ok", "1");
+      localStorage.setItem(
+        "cmflix-adult-ok",
+        "1"
+      );
     }
 
     state.category = page;
+    updateBottomNavigation(page);
     renderHome(page);
     return;
   }
 
   if (page === "watch" && parts[1]) {
-    renderDetail(decodeURIComponent(parts[1]));
+    updateBottomNavigation("watch");
+
+    renderDetail(
+      decodeURIComponent(parts[1])
+    );
+
     return;
   }
 
   if (page === "favorites") {
+    updateBottomNavigation("favorites");
     renderFavorites();
     return;
   }
 
   if (page === "admin") {
+    updateBottomNavigation("");
     renderAdmin();
     return;
   }
