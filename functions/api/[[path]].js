@@ -21,24 +21,6 @@ export async function onRequest(context) {
   return bootstrap(request, env);
 }
 
-
-    /*
-     * TMDB image proxy
-     *
-     * Browser က image.tmdb.org ကို တိုက်ရိုက်မခေါ်တော့ဘဲ
-     * ကိုယ့် website ရဲ့ /api/tmdb-image/... ကနေ ပုံယူပါမယ်။
-     */
-    if (
-      path.startsWith("tmdb-image/") &&
-      method === "GET"
-    ) {
-      return proxyTMDBImage(
-        request,
-        context,
-        path.slice("tmdb-image/".length)
-      );
-    }
-
     if (path === "setup" && method === "POST") {
       return setupAdmin(request, env);
     }
@@ -119,6 +101,10 @@ export async function onRequest(context) {
 
     if (path === "admin/titles" && method === "POST") {
       return adminCreateTitle(request, env);
+    }
+
+    if (path === "admin/titles/publish-all" && method === "POST") {
+      return adminPublishAll(request, env);
     }
 
     const titleMatch = path.match(/^admin\/titles\/([^/]+)$/);
@@ -403,6 +389,17 @@ async function getAuth(request, env) {
   const token = parseCookies(request)[SESSION_COOKIE];
 
   if (!token) return null;
+
+  // ~2% ဖြစ်နိုင်ခြေဖြင့် expired session အဟောင်းများ ရှင်းလင်းမယ် (request မပိုစေရန်)
+  if (Math.random() < 0.02) {
+    try {
+      await env.DB.prepare(
+        "DELETE FROM sessions WHERE expires_at <= ?"
+      ).bind(Date.now()).run();
+    } catch (_) {
+      /* cleanup မအောင်မြင်လည်း login ကို မထိခိုက်စေပါ */
+    }
+  }
 
   const tokenHash = await sha256(token);
 
@@ -754,6 +751,15 @@ async function bootstrap(request, env) {
  *
  * Custom poster URL တွေကိုတော့ မပြောင်းပါ။
  */
+/*
+ * Proxy ဖြုတ်လိုက်ပါပြီ။
+ *
+ * - TMDB ပုံ URL တွေကို image.tmdb.org ကနေ တိုက်ရိုက်သုံးမယ်။
+ * - အရင်က သိမ်းထားခဲ့တဲ့ /api/tmdb-image/{size}/{file} proxy path
+ *   တွေကိုလည်း မူရင်း image.tmdb.org URL အဖြစ် ပြန်ပြောင်းပေးမယ်။
+ * - Custom link ပုံတွေ (image.tmdb.org မဟုတ်တာ) ကိုတော့
+ *   မူရင်းအတိုင်း ဘာမှမပြင်ဘဲ ပြန်ပေးမယ်။
+ */
 function proxiedTMDBImageURL(
   value,
   preferredSize = "w500"
@@ -781,12 +787,8 @@ function proxiedTMDBImageURL(
     : "w500";
 
   /*
-   * Proxy path ဖြစ်ပြီးသားဆိုလည်း လိုအပ်တဲ့
-   * preferred size ကို ပြောင်းပေးပါမယ်။
-   *
-   * /api/tmdb-image/original/file.jpg
-   * =>
-   * /api/tmdb-image/w342/file.jpg
+   * အရင် proxy path (/api/tmdb-image/{size}/{file}) အဟောင်းတွေကို
+   * image.tmdb.org URL အဖြစ် ပြန်ပြောင်းပေးမယ်။
    */
   const proxyMatch = raw.match(
     /^\/api\/tmdb-image\/[^/]+\/(.+)$/i
@@ -796,13 +798,10 @@ function proxiedTMDBImageURL(
     const filePath = proxyMatch[1]
       .split("/")
       .filter(Boolean)
-      .map(part => encodeURIComponent(
-        decodeURIComponent(part)
-      ))
       .join("/");
 
     return filePath
-      ? `/api/tmdb-image/${safeSize}/${filePath}`
+      ? `https://image.tmdb.org/t/p/${safeSize}/${filePath}`
       : "";
   }
 
@@ -812,12 +811,15 @@ function proxiedTMDBImageURL(
     parsed = new URL(raw);
   } catch {
     /*
-     * ကိုယ့် site ထဲက custom relative URL ဖြစ်နိုင်လို့
-     * မူရင်းအတိုင်း ပြန်ပေးပါမယ်။
+     * Custom relative URL ဖြစ်နိုင်လို့ မူရင်းအတိုင်း ပြန်ပေးမယ်။
      */
     return raw;
   }
 
+  /*
+   * image.tmdb.org မဟုတ်ရင် custom link ပုံဖြစ်လို့
+   * ဘာမှမပြင်ဘဲ မူရင်းအတိုင်း ပြန်ပေးမယ်။
+   */
   if (
     parsed.hostname.toLowerCase() !==
     "image.tmdb.org"
@@ -825,6 +827,10 @@ function proxiedTMDBImageURL(
     return raw;
   }
 
+  /*
+   * image.tmdb.org URL ဖြစ်ရင် လိုချင်တဲ့ size ကို
+   * ချိန်ညှိပြီး တိုက်ရိုက် URL ပြန်ပေးမယ်။
+   */
   const match = parsed.pathname.match(
     /^\/t\/p\/[^/]+\/(.+)$/
   );
@@ -836,16 +842,13 @@ function proxiedTMDBImageURL(
   const filePath = match[1]
     .split("/")
     .filter(Boolean)
-    .map(part => encodeURIComponent(
-      decodeURIComponent(part)
-    ))
     .join("/");
 
   if (!filePath) {
     return "";
   }
 
-  return `/api/tmdb-image/${safeSize}/${filePath}`;
+  return `https://image.tmdb.org/t/p/${safeSize}/${filePath}`;
 }
 
 
@@ -1092,7 +1095,7 @@ const offset = (page - 1) * limit;
   const cacheURL = new URL(url.toString());
 
   // အဟောင်း cache နဲ့မရောစေရန်
-  cacheURL.searchParams.set("_dataVersion", "4");
+  cacheURL.searchParams.set("_dataVersion", "5");
 
   const cacheKey = new Request(cacheURL.toString(), {
     method: "GET"
@@ -1122,7 +1125,7 @@ const offset = (page - 1) * limit;
   }
 
   query += `
-    ORDER BY featured DESC, created_at DESC
+    ORDER BY featured DESC, updated_at DESC, created_at DESC
     LIMIT ? OFFSET ?
   `;
 
@@ -1690,6 +1693,28 @@ function cleanEpisodes(episodes) {
       a.season_number - b.season_number ||
       a.episode_number - b.episode_number
   );
+}
+
+async function adminPublishAll(request, env) {
+  const admin = await requireAdmin(request, env, true);
+  if (admin.error) return admin.error;
+
+  const now = Date.now();
+
+  /*
+   * Draft ကားအားလုံးကို Public ပြောင်းမယ်။
+   * updated_at ကို အသစ်ထားလို့ web ထဲ ထိပ်ဆုံးပေါ်ပါလိမ့်မယ်။
+   */
+  const result = await env.DB.prepare(
+    `UPDATE titles
+     SET status = 'public', updated_at = ?
+     WHERE status = 'draft'`
+  ).bind(now).run();
+
+  return json({
+    ok: true,
+    published: result.meta?.changes || 0
+  });
 }
 
 async function adminCreateTitle(request, env) {
