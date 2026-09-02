@@ -705,18 +705,56 @@ async function getStatus(env) {
  *
  * Custom poster URL တွေကိုတော့ မပြောင်းပါ။
  */
-function proxiedTMDBImageURL(value, preferredSize = "w500") {
+function proxiedTMDBImageURL(
+  value,
+  preferredSize = "w500"
+) {
   const raw = String(value || "").trim();
 
   if (!raw) {
     return "";
   }
 
+  const allowedSizes = new Set([
+    "original",
+    "w92",
+    "w154",
+    "w185",
+    "w300",
+    "w342",
+    "w500",
+    "w780",
+    "w1280"
+  ]);
+
+  const safeSize = allowedSizes.has(preferredSize)
+    ? preferredSize
+    : "w500";
+
   /*
-   * Proxy URL ဖြစ်ပြီးသားဆို ထပ်မပြောင်းပါ။
+   * Proxy path ဖြစ်ပြီးသားဆိုလည်း လိုအပ်တဲ့
+   * preferred size ကို ပြောင်းပေးပါမယ်။
+   *
+   * /api/tmdb-image/original/file.jpg
+   * =>
+   * /api/tmdb-image/w342/file.jpg
    */
-  if (raw.startsWith("/api/tmdb-image/")) {
-    return raw;
+  const proxyMatch = raw.match(
+    /^\/api\/tmdb-image\/[^/]+\/(.+)$/i
+  );
+
+  if (proxyMatch) {
+    const filePath = proxyMatch[1]
+      .split("/")
+      .filter(Boolean)
+      .map(part => encodeURIComponent(
+        decodeURIComponent(part)
+      ))
+      .join("/");
+
+    return filePath
+      ? `/api/tmdb-image/${safeSize}/${filePath}`
+      : "";
   }
 
   let parsed;
@@ -725,13 +763,16 @@ function proxiedTMDBImageURL(value, preferredSize = "w500") {
     parsed = new URL(raw);
   } catch {
     /*
-     * Local/custom relative URL ဖြစ်နိုင်တဲ့အတွက်
-     * မပြောင်းဘဲ မူရင်းကိုပဲပြန်ပေးပါမယ်။
+     * ကိုယ့် site ထဲက custom relative URL ဖြစ်နိုင်လို့
+     * မူရင်းအတိုင်း ပြန်ပေးပါမယ်။
      */
     return raw;
   }
 
-  if (parsed.hostname.toLowerCase() !== "image.tmdb.org") {
+  if (
+    parsed.hostname.toLowerCase() !==
+    "image.tmdb.org"
+  ) {
     return raw;
   }
 
@@ -746,19 +787,18 @@ function proxiedTMDBImageURL(value, preferredSize = "w500") {
   const filePath = match[1]
     .split("/")
     .filter(Boolean)
-    .map(part => encodeURIComponent(part))
+    .map(part => encodeURIComponent(
+      decodeURIComponent(part)
+    ))
     .join("/");
 
   if (!filePath) {
     return "";
   }
 
-  return (
-    `/api/tmdb-image/` +
-    `${encodeURIComponent(preferredSize)}/` +
-    filePath
-  );
+  return `/api/tmdb-image/${safeSize}/${filePath}`;
 }
+
 
 /*
  * /api/tmdb-image/{size}/{file}
@@ -990,8 +1030,9 @@ async function publicTitles(request, env, context) {
     Number(url.searchParams.get("page") || 1)
   );
 
-  const limit = 18;
-  const offset = (page - 1) * limit;
+  const limit = 15;
+const offset = (page - 1) * limit;
+
 
   if (!["movies", "series", "lugyi"].includes(category)) {
     return json({ error: "Category မှားနေပါသည်" }, 400);
@@ -1048,35 +1089,27 @@ async function publicTitles(request, env, context) {
    * Database ထဲ genres မရှိသေးတဲ့ အဟောင်းကားတွေကို
    * TMDB ကနေ genre ပြန်ယူပေးပါတယ်။
    */
-  const items = await Promise.all(
-    databaseItems.map(async item => {
-      let genres =
-        String(item.genres || "").trim();
+  const items = databaseItems.map(item => ({
+  ...item,
 
-      if (!genres && item.tmdb_id) {
-        const tmdb = await fetchTMDBDetails(
-          env,
-          item.tmdb_type,
-          item.tmdb_id
-        );
+  /*
+   * List request တိုင်း TMDB ကို ထပ်မခေါ်ပါ။
+   * Genres ကို admin import/save လုပ်ချိန်ကတည်းက
+   * database ထဲသိမ်းထားရပါမယ်။
+   */
+  genres: String(item.genres || "").trim(),
 
-        genres = tmdb?.genres || "";
-      }
+  poster_url: proxiedTMDBImageURL(
+    item.poster_url,
+    "w342"
+  ),
 
-      return {
-        ...item,
-        genres,
-        poster_url: proxiedTMDBImageURL(
-          item.poster_url,
-          "w500"
-        ),
-        backdrop_url: proxiedTMDBImageURL(
-          item.backdrop_url,
-          "original"
-        )
-      };
-    })
-  );
+  backdrop_url: proxiedTMDBImageURL(
+    item.backdrop_url,
+    "w780"
+  )
+}));
+
 
   const response = json(
     {
@@ -1169,14 +1202,15 @@ async function publicTitle(request, env, slug, context) {
      * browser ဆီမပို့ခင် proxy URL ပြောင်းပေးပါမယ်။
      */
     poster_url: proxiedTMDBImageURL(
-      title.poster_url,
-      "w500"
-    ),
+  title.poster_url,
+  "w500"
+),
 
-    backdrop_url: proxiedTMDBImageURL(
-      title.backdrop_url,
-      "original"
-    ),
+backdrop_url: proxiedTMDBImageURL(
+  title.backdrop_url,
+  "w1280"
+),
+
 
     cast: tmdb?.cast || [],
     episodes: episodes.results || []
@@ -1519,13 +1553,13 @@ async function adminGetTitle(request, env, id) {
     item: {
       ...title,
       poster_url: proxiedTMDBImageURL(
-        title.poster_url,
-        "w500"
-      ),
-      backdrop_url: proxiedTMDBImageURL(
-        title.backdrop_url,
-        "original"
-      ),
+  item.poster_url,
+  "w342"
+),
+backdrop_url: proxiedTMDBImageURL(
+  item.backdrop_url,
+  "w780"
+),
       episodes: episodes.results || []
     }
   });
