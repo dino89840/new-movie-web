@@ -975,9 +975,10 @@ async function proxyTMDBImage(
 
   headers.set("content-type", contentType);
   headers.set(
-    "cache-control",
-    "public, max-age=2592000, s-maxage=2592000, immutable"
-  );
+  "cache-control",
+  "public, max-age=31536000, s-maxage=31536000, immutable"
+);
+
   headers.set("x-content-type-options", "nosniff");
 
   const etag = upstreamResponse.headers.get("etag");
