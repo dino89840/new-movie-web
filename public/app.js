@@ -893,7 +893,7 @@ async function renderDetail(slug) {
                       type="button"
                       disabled
                     >
-                      Video မရှိသေးပါ
+                      အောက်တွင်အပိုင်းရွေးပါ
                     </button>
                   `
               }
