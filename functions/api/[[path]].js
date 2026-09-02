@@ -1132,18 +1132,33 @@ const offset = (page - 1) * limit;
 }
 
 
-async function publicTitle(request, env, slug, context) {
+async function publicTitle(
+  request,
+  env,
+  slug,
+  context
+) {
   const cache = caches.default;
   const cacheURL = new URL(request.url);
 
-  // အဟောင်း cast မပါတဲ့ cache ကိုရှောင်ရန်
-  cacheURL.searchParams.set("_dataVersion", "4");
+  /*
+   * Data format ပြောင်းထားတာကြောင့်
+   * အဟောင်း cache မသုံးအောင် version တိုးထားပါတယ်။
+   */
+  cacheURL.searchParams.set(
+    "_dataVersion",
+    "5"
+  );
 
-  const cacheKey = new Request(cacheURL.toString(), {
-    method: "GET"
-  });
+  const cacheKey = new Request(
+    cacheURL.toString(),
+    {
+      method: "GET"
+    }
+  );
 
-  const cached = await cache.match(cacheKey);
+  const cached =
+    await cache.match(cacheKey);
 
   if (cached) {
     return cached;
@@ -1152,68 +1167,56 @@ async function publicTitle(request, env, slug, context) {
   const title = await env.DB.prepare(
     `SELECT *
      FROM titles
-     WHERE slug=? AND status='public'
+     WHERE slug = ?
+       AND status = 'public'
      LIMIT 1`
   )
     .bind(slug)
     .first();
 
   if (!title) {
-    return json({ error: "ဇာတ်ကားမတွေ့ပါ" }, 404);
+    return json(
+      { error: "ဇာတ်ကားမတွေ့ပါ" },
+      404
+    );
   }
 
-  const episodes = await env.DB.prepare(
-    `SELECT
-       id,
-       season_number,
-       episode_number,
-       episode_title,
-       video_url,
-       video_type
-     FROM episodes
-     WHERE title_id=?
-     ORDER BY season_number, episode_number`
-  )
-    .bind(title.id)
-    .all();
-
-  const tmdb = title.tmdb_id
-    ? await fetchTMDBDetails(
-        env,
-        title.tmdb_type,
-        title.tmdb_id
-      )
-    : null;
+  const episodesResult =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         season_number,
+         episode_number,
+         episode_title,
+         video_url,
+         video_type
+       FROM episodes
+       WHERE title_id = ?
+       ORDER BY
+         season_number ASC,
+         episode_number ASC`
+    )
+      .bind(title.id)
+      .all();
 
   const item = {
     ...title,
 
-    /*
-     * Database ထဲမှာ genre ရှိရင် database ကိုသုံးပြီး
-     * မရှိရင် TMDB genre ကိုသုံးပါမယ်။
-     */
     genres:
-      String(title.genres || "").trim() ||
-      tmdb?.genres ||
-      "",
+      String(title.genres || "").trim(),
 
-    /*
-     * Database ထဲမှာ မူရင်း TMDB URL ရှိနေသေးရင်လည်း
-     * browser ဆီမပို့ခင် proxy URL ပြောင်းပေးပါမယ်။
-     */
     poster_url: proxiedTMDBImageURL(
-  title.poster_url,
-  "w500"
-),
+      title.poster_url,
+      "w500"
+    ),
 
-backdrop_url: proxiedTMDBImageURL(
-  title.backdrop_url,
-  "w1280"
-),
+    backdrop_url: proxiedTMDBImageURL(
+      title.backdrop_url,
+      "w1280"
+    ),
 
-
-    cast: tmdb?.cast || [],
-    episodes: episodes.results || []
+    episodes:
+      episodesResult.results || []
   };
 
   const response = json(
@@ -1221,16 +1224,22 @@ backdrop_url: proxiedTMDBImageURL(
     200,
     {
       "cache-control":
-        "public, max-age=30, s-maxage=300, stale-while-revalidate=600"
+        "public, max-age=30, " +
+        "s-maxage=300, " +
+        "stale-while-revalidate=600"
     }
   );
 
   context.waitUntil(
-    cache.put(cacheKey, response.clone())
+    cache.put(
+      cacheKey,
+      response.clone()
+    )
   );
 
   return response;
 }
+
 
 
 /* -------------------- Favorites -------------------- */
