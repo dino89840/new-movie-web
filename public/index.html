@@ -8,32 +8,126 @@
   >
   <meta name="theme-color" content="#080a0f">
   <title>CMFLIX</title>
-  <link rel="stylesheet" href="/style.css?v=7">
+  <link rel="stylesheet" href="/style.css?v=8">
 </head>
 <body>
   <header class="topbar">
-    <button class="brand" data-page="home" aria-label="Home">
-      <span class="brand-mark">CM</span>
-      <span>FLIX</span>
-    </button>
+  <button
+    class="brand"
+    data-page="home"
+    type="button"
+    aria-label="CMFLIX Home"
+  >
+    <span class="brand-mark">CM</span>
+    <span>FLIX</span>
+  </button>
 
-    <nav class="nav">
-      <button data-category="movies">Movies</button>
-      <button data-category="series">Series</button>
-      <button data-category="lugyi">Lugyi</button>
-      <button data-page="favorites">Favorites</button>
-    </nav>
+  <button
+    id="accountButton"
+    class="icon-button"
+    type="button"
+    aria-label="Account"
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7 8a7 7 0 0 0-14 0"/>
+    </svg>
+  </button>
+</header>
 
-    <button id="accountButton" class="icon-button" aria-label="Account">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7 8a7 7 0 0 0-14 0"/>
-      </svg>
-    </button>
-  </header>
+<main id="app">
+  <section class="loading-card">Loading CMFLIX…</section>
+</main>
 
-  <main id="app">
-    <section class="loading-card">Loading CMFLIX…</section>
-  </main>
+<nav
+  class="bottom-nav"
+  aria-label="Main navigation"
+>
+  <button
+    class="bottom-nav-item"
+    data-category="movies"
+    type="button"
+    aria-label="Movies"
+  >
+    <svg
+      class="bottom-nav-icon"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <rect x="3" y="5" width="18" height="15" rx="2"/>
+      <path d="M7 5V3"/>
+      <path d="M12 5V3"/>
+      <path d="M17 5V3"/>
+      <path d="M3 10h18"/>
+      <path d="m10 13 5 2.5-5 2.5Z"/>
+    </svg>
+
+    <span>Movies</span>
+  </button>
+
+  <button
+    class="bottom-nav-item"
+    data-category="series"
+    type="button"
+    aria-label="Series"
+  >
+    <svg
+      class="bottom-nav-icon"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2"/>
+      <path d="M8 4v16"/>
+      <path d="M3 9h5"/>
+      <path d="M3 15h5"/>
+      <path d="M16 4v16"/>
+      <path d="M16 9h5"/>
+      <path d="M16 15h5"/>
+    </svg>
+
+    <span>Series</span>
+  </button>
+
+  <button
+    class="bottom-nav-item"
+    data-category="lugyi"
+    type="button"
+    aria-label="Lugyi"
+  >
+    <svg
+      class="bottom-nav-icon"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path d="M12 3 3.5 7.5v9L12 21l8.5-4.5v-9Z"/>
+      <path d="M8.5 10.5h7"/>
+      <path d="M12 8v5"/>
+      <path d="M8.5 16h7"/>
+    </svg>
+
+    <span>Lugyi</span>
+  </button>
+
+  <button
+    class="bottom-nav-item"
+    data-page="favorites"
+    type="button"
+    aria-label="Favorites"
+  >
+    <svg
+      class="bottom-nav-icon"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        d="M20.8 4.6a5.4 5.4 0 0 0-7.6 0L12 5.8l-1.2-1.2a5.4
+        5.4 0 0 0-7.6 7.6L12 21l8.8-8.8a5.4 5.4 0 0 0 0-7.6Z"
+      />
+    </svg>
+
+    <span>Favorites</span>
+  </button>
+</nav>
+
 
   <div id="toast" class="toast"></div>
 
@@ -106,8 +200,7 @@
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
-  <script type="module" src="/app.js?v=7"></script>
+  <script type="module" src="/app.js?v=8"></script>
 </body>
 </html>
-
 
