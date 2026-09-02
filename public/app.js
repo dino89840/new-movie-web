@@ -1899,29 +1899,5 @@ authContent.addEventListener("click", async event => {
     }
   }
 });
-function isProtectedMedia(target) {
-  return target instanceof Element &&
-    Boolean(
-      target.closest(
-        ".poster-wrap, " +
-        ".detail-poster, " +
-        ".cast-card img, " +
-        ".hero, " +
-        ".detail-hero"
-      )
-    );
-}
-
-document.addEventListener("contextmenu", event => {
-  if (isProtectedMedia(event.target)) {
-    event.preventDefault();
-  }
-});
-
-document.addEventListener("dragstart", event => {
-  if (isProtectedMedia(event.target)) {
-    event.preventDefault();
-  }
-});
 
 initialize();
