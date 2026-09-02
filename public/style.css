@@ -1551,3 +1551,10 @@ body {
     max-height: 100dvh;
   }
 }
+
+.detail-overview p {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
