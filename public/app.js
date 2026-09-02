@@ -614,6 +614,203 @@ function movieCard(item) {
   `;
 }
 
+function setupEpisodeBrowser(rawEpisodes) {
+  const host =
+    document.querySelector("#episodeBrowser");
+
+  if (!host) {
+    return;
+  }
+
+  const episodes = [...rawEpisodes].sort(
+    (a, b) =>
+      Number(a.season_number) -
+        Number(b.season_number) ||
+      Number(a.episode_number) -
+        Number(b.episode_number)
+  );
+
+  const seasons = [
+    ...new Set(
+      episodes.map(episode =>
+        positiveInteger(
+          episode.season_number,
+          1
+        )
+      )
+    )
+  ].sort((a, b) => a - b);
+
+  const pageSize = 12;
+  let activeSeason = seasons[0] || 1;
+  let currentPage = 1;
+
+  const draw = () => {
+    const seasonEpisodes = episodes.filter(
+      episode =>
+        positiveInteger(
+          episode.season_number,
+          1
+        ) === activeSeason
+    );
+
+    const totalPages = Math.max(
+      1,
+      Math.ceil(
+        seasonEpisodes.length / pageSize
+      )
+    );
+
+    currentPage = Math.min(
+      Math.max(currentPage, 1),
+      totalPages
+    );
+
+    const start =
+      (currentPage - 1) * pageSize;
+
+    const visibleEpisodes =
+      seasonEpisodes.slice(
+        start,
+        start + pageSize
+      );
+
+    host.innerHTML = `
+      <div class="episode-toolbar">
+        <label class="season-selector">
+          <span>Season</span>
+
+          <select id="seasonSelect">
+            ${seasons.map(season => `
+              <option
+                value="${season}"
+                ${
+                  season === activeSeason
+                    ? "selected"
+                    : ""
+                }
+              >
+                Season ${season}
+              </option>
+            `).join("")}
+          </select>
+        </label>
+
+        <span class="episode-count">
+          ${seasonEpisodes.length} Episodes
+        </span>
+      </div>
+
+      <div class="episode-grid">
+        ${visibleEpisodes.map(episode => `
+          <button
+            type="button"
+            class="episode-button"
+            data-play-url="${escapeHTML(
+              episode.video_url
+            )}"
+            data-play-type="${escapeHTML(
+              episode.video_type || "auto"
+            )}"
+            data-play-name="${escapeHTML(
+              `S${episode.season_number} ` +
+              `E${episode.episode_number} ` +
+              `${episode.episode_title || ""}`
+            )}"
+          >
+            <strong>
+              S${positiveInteger(
+                episode.season_number,
+                1
+              )}
+              E${positiveInteger(
+                episode.episode_number,
+                1
+              )}
+            </strong>
+
+            <span class="muted">
+              ${escapeHTML(
+                episode.episode_title ||
+                `Episode ${episode.episode_number}`
+              )}
+            </span>
+          </button>
+        `).join("")}
+      </div>
+
+      ${
+        totalPages > 1
+          ? `
+            <div class="episode-pagination">
+              <button
+                type="button"
+                class="button secondary small"
+                data-episode-page="previous"
+                ${currentPage <= 1 ? "disabled" : ""}
+              >
+                ← Previous
+              </button>
+
+              <span>
+                ${currentPage} / ${totalPages}
+              </span>
+
+              <button
+                type="button"
+                class="button secondary small"
+                data-episode-page="next"
+                ${
+                  currentPage >= totalPages
+                    ? "disabled"
+                    : ""
+                }
+              >
+                Next →
+              </button>
+            </div>
+          `
+          : ""
+      }
+    `;
+
+    host
+      .querySelector("#seasonSelect")
+      ?.addEventListener("change", event => {
+        activeSeason = positiveInteger(
+          event.target.value,
+          seasons[0] || 1
+        );
+
+        currentPage = 1;
+        draw();
+      });
+
+    host
+      .querySelectorAll("[data-episode-page]")
+      .forEach(button => {
+        button.addEventListener("click", () => {
+          if (
+            button.dataset.episodePage ===
+            "previous"
+          ) {
+            currentPage--;
+          } else {
+            currentPage++;
+          }
+
+          draw();
+
+          host.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+          });
+        });
+      });
+  };
+
+  draw();
+}
 
 async function renderDetail(slug) {
   app.innerHTML = `
@@ -629,7 +826,6 @@ async function renderDetail(slug) {
 
     const item = data.item;
     const episodes = item.episodes || [];
-    const cast = item.cast || [];
     const genres = splitGenres(item.genres);
 
     app.innerHTML = `
@@ -768,98 +964,22 @@ async function renderDetail(slug) {
       }
 
       ${
-        cast.length
-          ? `
-            <section class="detail-section">
-              <div class="detail-section-heading">
-                <h2>ဇာတ်ဆောင်များ</h2>
-              </div>
+  episodes.length
+    ? `
+      <section class="episode-section detail-section">
+        <div class="detail-section-heading">
+          <h2>Episodes</h2>
+        </div>
 
-              <div class="cast-scroll">
-                ${cast.map(person => `
-                  <article class="cast-card">
-                    ${
-                      person.profile_url
-                        ? `
-                          <img
-                            src="${escapeHTML(
-                              person.profile_url
-                            )}"
-                            alt="${escapeHTML(person.name)}"
-                            loading="lazy"
-                          >
-                        `
-                        : `
-                          <div class="cast-placeholder">
-                            ${escapeHTML(
-                              String(person.name || "?")
-                                .charAt(0)
-                                .toUpperCase()
-                            )}
-                          </div>
-                        `
-                    }
+        <div
+          id="episodeBrowser"
+          class="episode-browser"
+        ></div>
+      </section>
+    `
+    : ""
+}
 
-                    <strong>
-                      ${escapeHTML(person.name)}
-                    </strong>
-
-                    <span>
-                      ${escapeHTML(
-                        person.character ||
-                        "Cast"
-                      )}
-                    </span>
-                  </article>
-                `).join("")}
-              </div>
-            </section>
-          `
-          : ""
-      }
-
-      ${
-        episodes.length
-          ? `
-            <section class="episode-section detail-section">
-              <div class="detail-section-heading">
-                <h2>Episodes</h2>
-              </div>
-
-              <div class="episode-scroll">
-                ${episodes.map(episode => `
-                  <button
-                    class="episode-button"
-                    data-play-url="${escapeHTML(
-                      episode.video_url
-                    )}"
-                    data-play-type="${escapeHTML(
-                      episode.video_type
-                    )}"
-                    data-play-name="${escapeHTML(
-                      `S${episode.season_number} ` +
-                      `E${episode.episode_number} ` +
-                      `${episode.episode_title || ""}`
-                    )}"
-                  >
-                    <strong>
-                      S${episode.season_number}
-                      E${episode.episode_number}
-                    </strong>
-
-                    <span class="muted">
-                      ${escapeHTML(
-                        episode.episode_title ||
-                        "Episode"
-                      )}
-                    </span>
-                  </button>
-                `).join("")}
-              </div>
-            </section>
-          `
-          : ""
-      }
     `;
   } catch (error) {
     app.innerHTML = `
@@ -867,6 +987,10 @@ async function renderDetail(slug) {
         ${escapeHTML(error.message)}
       </section>
     `;
+    if (episodes.length) {
+  setupEpisodeBrowser(episodes);
+}
+
   }
 }
 
@@ -1180,18 +1304,57 @@ function playVideo(url, type = "auto", name = "") {
 
 
 
-function parseEpisodes(text) {
-  const input = String(text || "").trim();
-  if (!input) return [];
+function cleanEpisodeURL(value) {
+  const cleaned = String(value || "")
+    .trim()
+    .replace(/^[("'[{<]+/g, "")
+    .replace(/[)"'\]}>;]+$/g, "");
 
   try {
+    const parsed = new URL(cleaned);
+
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return "";
+    }
+
+    return parsed.href;
+  } catch {
+    return "";
+  }
+}
+
+function positiveInteger(value, fallback = 1) {
+  const number = Number.parseInt(value, 10);
+
+  return Number.isFinite(number) && number > 0
+    ? number
+    : fallback;
+}
+
+function parseEpisodes(text) {
+  const input = String(text || "").trim();
+
+  if (!input) {
+    return [];
+  }
+
+  /*
+   * JSON input ကိုအရင်စမ်းမယ်။
+   */
+  try {
     const json = JSON.parse(input);
-    const rows = Array.isArray(json) ? json : json.episodes;
+    const rows = Array.isArray(json)
+      ? json
+      : json?.episodes;
 
     if (Array.isArray(rows)) {
       return normalizeParsedEpisodes(rows);
     }
-  } catch {}
+  } catch {
+    /*
+     * JSON မဟုတ်ရင် line parser ဆက်သုံးမယ်။
+     */
+  }
 
   const lines = input
     .split(/\r?\n/)
@@ -1199,46 +1362,73 @@ function parseEpisodes(text) {
     .filter(Boolean);
 
   const episodes = [];
-  let automaticEpisode = 1;
+  const nextEpisodeBySeason = new Map();
 
   for (const line of lines) {
-    const urls = line.match(/https?:\/\/[^\s"'`,;)]+/gi);
-    if (!urls?.length) continue;
+    /*
+     * Comma ကို URL separator ထဲမထည့်ထားပါ။
+     * Four_Hands,_Two_Sonatas လို URL တွေ အပြည့်ရပါမယ်။
+     */
+    const rawURLs =
+      line.match(/\bhttps?:\/\/[^\s<>"']+/gi) || [];
 
-    const seasonMatch = line.match(
-      /(?:season|s)\s*0*(\d+)/i
-    );
+    const urls = rawURLs
+      .map(cleanEpisodeURL)
+      .filter(Boolean);
 
-    const episodeMatch = line.match(
-      /(?:episode|ep|e)\s*0*(\d+)/i
-    );
-
-    let season = seasonMatch ? Number(seasonMatch[1]) : 1;
-    let episode = episodeMatch
-      ? Number(episodeMatch[1])
-      : automaticEpisode;
-
-    if (!episodeMatch) {
-      const beforeURL = line.slice(0, line.indexOf(urls[0]));
-      const numbers = beforeURL.match(/\d+/g);
-
-      if (numbers?.length) {
-        episode = Number(numbers[numbers.length - 1]);
-      }
+    if (!urls.length) {
+      continue;
     }
+
+    /*
+     * Filename ထဲက S01E02, S1_E2၊
+     * စာသားထဲက Season 1 Episode 2 တွေကိုပါ ဖတ်နိုင်မယ်။
+     */
+    let readableLine = line;
+
+    try {
+      readableLine = decodeURIComponent(line);
+    } catch {
+      /*
+       * Malformed URI ဖြစ်ရင် မူရင်းစာသားကိုသုံးမယ်။
+       */
+    }
+
+    const seasonMatch = readableLine.match(
+      /(?:season|s)[\s._-]*0*(\d{1,3})(?!\d)/i
+    );
+
+    const episodeMatch = readableLine.match(
+      /(?:episode|ep|e)[\s._-]*0*(\d{1,4})(?!\d)/i
+    );
+
+    const season = positiveInteger(
+      seasonMatch?.[1],
+      1
+    );
+
+    let episode = episodeMatch
+      ? positiveInteger(episodeMatch[1], 1)
+      : positiveInteger(
+          nextEpisodeBySeason.get(season),
+          1
+        );
 
     for (const url of urls) {
       episodes.push({
         season_number: season,
         episode_number: episode,
         episode_title: `Episode ${episode}`,
-        video_url: url.replace(/[)'";,]+$/g, ""),
-        video_type: /\.m3u8($|\?)/i.test(url) ? "m3u8" : "auto"
+        video_url: url,
+        video_type: /\.m3u8(?:$|[?#])/i.test(url)
+          ? "m3u8"
+          : "auto"
       });
 
       episode++;
-      automaticEpisode = Math.max(automaticEpisode, episode);
     }
+
+    nextEpisodeBySeason.set(season, episode);
   }
 
   return normalizeParsedEpisodes(episodes);
@@ -1247,33 +1437,50 @@ function parseEpisodes(text) {
 function normalizeParsedEpisodes(rows) {
   const unique = new Map();
 
-  for (const row of rows) {
-    const season = Math.max(
-      1,
-      Number(row.season_number ?? row.season ?? 1)
+  for (const row of rows || []) {
+    const season = positiveInteger(
+      row.season_number ?? row.season,
+      1
     );
 
-    const episode = Math.max(
-      1,
-      Number(row.episode_number ?? row.episode ?? row.ep ?? 1)
+    const episode = positiveInteger(
+      row.episode_number ??
+      row.episode ??
+      row.ep,
+      1
     );
 
-    const url = String(
-      row.video_url ?? row.url ?? row.link ?? ""
-    ).trim();
+    const url = cleanEpisodeURL(
+      row.video_url ??
+      row.url ??
+      row.link
+    );
 
-    if (!/^https?:\/\//i.test(url)) continue;
+    if (!url) {
+      continue;
+    }
+
+    const requestedType = String(
+      row.video_type || ""
+    ).toLowerCase();
+
+    const videoType = ["auto", "mp4", "m3u8"]
+      .includes(requestedType)
+      ? requestedType
+      : /\.m3u8(?:$|[?#])/i.test(url)
+        ? "m3u8"
+        : "auto";
 
     unique.set(`${season}:${episode}`, {
       season_number: season,
       episode_number: episode,
       episode_title: String(
-        row.episode_title ?? row.title ?? `Episode ${episode}`
-      ),
+        row.episode_title ??
+        row.title ??
+        `Episode ${episode}`
+      ).trim(),
       video_url: url,
-      video_type:
-        row.video_type ||
-        (/\.m3u8($|\?)/i.test(url) ? "m3u8" : "auto")
+      video_type: videoType
     });
   }
 
@@ -1440,7 +1647,18 @@ async function renderTitleEditor(id = null) {
         ${field("original_title", "Original title", item.original_title)}
         ${field("release_date", "Release date", item.release_date)}
         ${field("year", "Year", item.year, false, "number")}
-        ${field("rating", "Rating", item.rating, false, "number")}
+        <label class="field">
+  <span>Rating</span>
+  <input
+    name="rating"
+    type="number"
+    inputmode="decimal"
+    min="0"
+    max="10"
+    step="0.1"
+    value="${escapeHTML(item.rating ?? 0)}"
+  >
+</label>
         ${field(
   "poster_url",
   "Poster URL or proxy path",
@@ -1579,18 +1797,194 @@ function option(value, current) {
 }
 
 function renderEpisodePreview() {
-  const preview = document.querySelector("#episodePreview");
-  if (!preview) return;
+  const preview =
+    document.querySelector("#episodePreview");
 
-  preview.innerHTML = state.parsedEpisodes.length
-    ? state.parsedEpisodes.map(episode => `
-        <div class="parser-row">
-          <span>S${episode.season_number}</span>
-          <span>E${episode.episode_number}</span>
-          <span>${escapeHTML(episode.video_url)}</span>
+  if (!preview) {
+    return;
+  }
+
+  if (!state.parsedEpisodes.length) {
+    preview.innerHTML = `
+      <div class="parser-empty">
+        Episode မရှိသေးပါ
+      </div>
+    `;
+
+    return;
+  }
+
+  preview.innerHTML = `
+    <div class="parser-preview-header">
+      <strong>
+        Episodes (${state.parsedEpisodes.length})
+      </strong>
+
+      <button
+        type="button"
+        class="button danger small"
+        data-clear-episodes
+      >
+        အားလုံးဖျက်မည်
+      </button>
+    </div>
+
+    <div class="parser-list">
+      ${state.parsedEpisodes.map((episode, index) => `
+        <div
+          class="parser-row editable"
+          data-episode-index="${index}"
+        >
+          <label>
+            <span>Season</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value="${escapeHTML(
+                episode.season_number
+              )}"
+              data-episode-field="season_number"
+            >
+          </label>
+
+          <label>
+            <span>Episode</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value="${escapeHTML(
+                episode.episode_number
+              )}"
+              data-episode-field="episode_number"
+            >
+          </label>
+
+          <label class="parser-url-field">
+            <span>Video URL</span>
+            <input
+              type="url"
+              value="${escapeHTML(
+                episode.video_url
+              )}"
+              data-episode-field="video_url"
+            >
+          </label>
+
+          <label>
+            <span>Type</span>
+            <select data-episode-field="video_type">
+              <option
+                value="auto"
+                ${
+                  episode.video_type === "auto"
+                    ? "selected"
+                    : ""
+                }
+              >
+                auto
+              </option>
+
+              <option
+                value="m3u8"
+                ${
+                  episode.video_type === "m3u8"
+                    ? "selected"
+                    : ""
+                }
+              >
+                m3u8
+              </option>
+
+              <option
+                value="mp4"
+                ${
+                  episode.video_type === "mp4"
+                    ? "selected"
+                    : ""
+                }
+              >
+                mp4
+              </option>
+            </select>
+          </label>
+
+          <button
+            type="button"
+            class="button danger small parser-delete"
+            data-remove-episode="${index}"
+          >
+            ဖျက်မည်
+          </button>
         </div>
-      `).join("")
-    : `<div class="parser-row">Episode မရှိသေးပါ</div>`;
+      `).join("")}
+    </div>
+  `;
+
+  preview
+    .querySelectorAll("[data-episode-field]")
+    .forEach(input => {
+      input.addEventListener("input", event => {
+        const row = event.target.closest(
+          "[data-episode-index]"
+        );
+
+        const index = Number(
+          row?.dataset.episodeIndex
+        );
+
+        const field =
+          event.target.dataset.episodeField;
+
+        const episode =
+          state.parsedEpisodes[index];
+
+        if (!episode || !field) {
+          return;
+        }
+
+        if (
+          field === "season_number" ||
+          field === "episode_number"
+        ) {
+          episode[field] = positiveInteger(
+            event.target.value,
+            1
+          );
+        } else {
+          episode[field] = event.target.value;
+        }
+      });
+    });
+
+  preview
+    .querySelectorAll("[data-remove-episode]")
+    .forEach(button => {
+      button.addEventListener("click", () => {
+        const index = Number(
+          button.dataset.removeEpisode
+        );
+
+        state.parsedEpisodes.splice(index, 1);
+        renderEpisodePreview();
+      });
+    });
+
+  preview
+    .querySelector("[data-clear-episodes]")
+    ?.addEventListener("click", () => {
+      const accepted = confirm(
+        "Episode အားလုံးဖျက်မှာ သေချာပါသလား?"
+      );
+
+      if (!accepted) {
+        return;
+      }
+
+      state.parsedEpisodes = [];
+      renderEpisodePreview();
+    });
 }
 
 async function searchTMDB() {
