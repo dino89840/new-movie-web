@@ -115,3 +115,11 @@ INSERT OR IGNORE INTO settings
 VALUES
 ('maintenance_mode', '0', 0),
 ('maintenance_message', 'CMFLIX ကို ခေတ္တပြုပြင်နေပါသည်။', 0);
+CREATE INDEX IF NOT EXISTS idx_titles_catalog
+ON titles(
+  status,
+  category,
+  featured DESC,
+  created_at DESC,
+  id DESC
+);
