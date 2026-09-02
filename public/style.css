@@ -805,15 +805,26 @@ body {
 
 .detail-overview p {
   margin: 0;
-  max-width: 760px;
-  color: rgba(255, 255, 255, .76);
-  line-height: 1.78;
-  white-space: pre-line;
+  max-width: 900px;
+  color: rgba(255, 255, 255, .82);
+  font-size: 15px;
+  line-height: 1.85;
 
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 5;
-  overflow: hidden;
+  /*
+   * Admin က line break ခွဲရေးထားရင်လည်း
+   * မူလအတိုင်း ပြပေးပါမယ်။
+   */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+
+  /*
+   * စာဖြတ်ခြင်းကို ပိတ်ထားပါတယ်။
+   */
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: initial;
 }
 
 .detail-actions {
@@ -1139,8 +1150,13 @@ body {
 
   .detail-overview p {
     font-size: 14px;
-    line-height: 1.75;
-    -webkit-line-clamp: 6;
+    line-height: 1.8;
+    display: block;
+    overflow: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: unset;
+    -webkit-box-orient: initial;
   }
 
   .detail-section {
@@ -1219,4 +1235,3 @@ body {
     max-height: 100dvh;
   }
 }
-
