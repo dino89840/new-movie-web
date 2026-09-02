@@ -1899,3 +1899,252 @@ body {
     flex: 1;
   }
 }
+/* ======================================================
+   CMFLIX fixed bottom navigation
+   ====================================================== */
+
+:root {
+  --bottom-nav-height: 78px;
+  --bottom-nav-accent: #15b8ff;
+  --bottom-nav-background: rgba(8, 10, 15, .96);
+}
+
+/*
+ * Top navigation ဖြုတ်ပြီးနောက်
+ * Logo နဲ့ Account button ကို ဘယ်/ညာ ခွဲထားမယ်။
+ */
+.topbar {
+  justify-content: space-between;
+}
+
+/*
+ * Content ကို fixed bottom navigation အောက်
+ * မဖုံးသွားအောင် နေရာချန်ထားမယ်။
+ */
+#app {
+  padding-bottom:
+    calc(
+      var(--bottom-nav-height) +
+      env(safe-area-inset-bottom) +
+      42px
+    );
+}
+
+/* Fixed bottom navigation container */
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+
+  min-height:
+    calc(
+      var(--bottom-nav-height) +
+      env(safe-area-inset-bottom)
+    );
+
+  padding:
+    8px
+    max(10px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom))
+    max(10px, env(safe-area-inset-left));
+
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 4px;
+
+  border-top: 1px solid rgba(255, 255, 255, .1);
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(8, 10, 15, .92),
+      var(--bottom-nav-background)
+    );
+
+  box-shadow:
+    0 -12px 35px rgba(0, 0, 0, .38);
+
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* Navigation button */
+.bottom-nav-item {
+  position: relative;
+  min-width: 0;
+  min-height: 60px;
+  padding: 5px 4px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+
+  border: 0;
+  border-radius: 13px;
+  outline: none;
+
+  background: transparent;
+  color: #969ba8;
+
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.1;
+  text-align: center;
+
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  transition:
+    color .2s ease,
+    background .2s ease,
+    transform .15s ease;
+}
+
+.bottom-nav-item span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Navigation icon */
+.bottom-nav-icon {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+
+  transition:
+    color .2s ease,
+    transform .2s ease,
+    filter .2s ease;
+}
+
+/* Selected item */
+.bottom-nav-item.active {
+  color: var(--bottom-nav-accent);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(21, 184, 255, .1),
+      rgba(21, 184, 255, .025)
+    );
+}
+
+.bottom-nav-item.active .bottom-nav-icon {
+  transform: translateY(-1px);
+  filter:
+    drop-shadow(
+      0 0 7px rgba(21, 184, 255, .42)
+    );
+}
+
+/* Active item အပေါ်မှာ indicator line သေးသေး */
+.bottom-nav-item.active::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 50%;
+
+  width: 30px;
+  height: 3px;
+
+  border-radius: 0 0 999px 999px;
+  background: var(--bottom-nav-accent);
+
+  box-shadow:
+    0 0 10px rgba(21, 184, 255, .6);
+
+  transform: translateX(-50%);
+}
+
+/* Keyboard accessibility */
+.bottom-nav-item:focus-visible {
+  box-shadow:
+    inset 0 0 0 2px var(--bottom-nav-accent);
+}
+
+/* Touch feedback */
+.bottom-nav-item:active {
+  transform: scale(.95);
+}
+
+/*
+ * Toast message ကို bottom navigation အပေါ်မှာ ပြမယ်။
+ */
+.toast {
+  bottom:
+    calc(
+      var(--bottom-nav-height) +
+      env(safe-area-inset-bottom) +
+      18px
+    );
+}
+
+/* Desktop မှာ navigation content အရမ်းပြန့်မသွားစေရန် */
+@media (min-width: 900px) {
+  .bottom-nav {
+    left: 50%;
+    right: auto;
+
+    width: min(620px, calc(100% - 40px));
+
+    border:
+      1px solid rgba(255, 255, 255, .11);
+    border-bottom: 0;
+    border-radius: 22px 22px 0 0;
+
+    transform: translateX(-50%);
+
+    box-shadow:
+      0 -14px 45px rgba(0, 0, 0, .5);
+  }
+}
+
+/* Mobile */
+@media (max-width: 680px) {
+  :root {
+    --bottom-nav-height: 72px;
+  }
+
+  .bottom-nav {
+    gap: 1px;
+    padding-top: 6px;
+  }
+
+  .bottom-nav-item {
+    min-height: 57px;
+    gap: 4px;
+    padding-inline: 2px;
+    border-radius: 11px;
+    font-size: 10px;
+  }
+
+  .bottom-nav-icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  /*
+   * အပေါ်က မူရင်း mobile #app padding-bottom: 50px
+   * rule ကို override ပြန်လုပ်ထားတာပါ။
+   */
+  #app {
+    padding-bottom:
+      calc(
+        var(--bottom-nav-height) +
+        env(safe-area-inset-bottom) +
+        32px
+      );
+  }
+}
