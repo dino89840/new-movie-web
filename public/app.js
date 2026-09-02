@@ -1166,7 +1166,19 @@ async function renderTitleEditor(id = null) {
         ${field("original_title", "Original title", item.original_title)}
         ${field("release_date", "Release date", item.release_date)}
         ${field("year", "Year", item.year, false, "number")}
-        ${field("rating", "Rating", item.rating, false, "number")}
+        <label class="field">
+          <span>Rating</span>
+          <input
+            name="rating"
+            type="number"
+            value="${escapeHTML(item.rating ?? "")}"
+            min="0"
+            max="10"
+            step="0.1"
+            inputmode="decimal"
+            placeholder="ဥပမာ 5.2"
+          >
+        </label>
         ${field("poster_url", "Poster URL", item.poster_url, false, "url")}
         ${field("backdrop_url", "Backdrop URL", item.backdrop_url, false, "url")}
         ${field("genres", "Genres", item.genres)}
