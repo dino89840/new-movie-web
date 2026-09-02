@@ -5,6 +5,10 @@ const accountButton = document.querySelector("#accountButton");
 const playerDialog = document.querySelector("#playerDialog");
 const player = document.querySelector("#videoPlayer");
 const playerTitle = document.querySelector("#playerTitle");
+const playerStatus = document.querySelector("#playerStatus");
+const playerFullscreen = document.querySelector(
+  "#playerFullscreen"
+);
 const toastElement = document.querySelector("#toast");
 
 const state = {
@@ -785,47 +789,120 @@ function openAuth(mode = "login") {
   authDialog.showModal();
 }
 
-function playVideo(url, type = "auto", name = "") {
-  if (!/^https?:\/\//i.test(url)) {
-    toast("Video URL မမှန်ပါ");
-    return;
-  }
+function setPlayerStatus(message = "", visible = false) {
+  playerStatus.textContent = message;
+  playerStatus.classList.toggle("show", visible);
+}
 
+function destroyHLSPlayer() {
   if (state.hls) {
     state.hls.destroy();
     state.hls = null;
   }
+}
+
+function closePlayer() {
+  destroyHLSPlayer();
 
   player.pause();
   player.removeAttribute("src");
   player.load();
 
+  setPlayerStatus("", false);
+
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+
+  if (playerDialog.open) {
+    playerDialog.close();
+  }
+}
+
+function playVideo(url, type = "auto", name = "") {
+  const videoURL = String(url || "").trim();
+
+  if (!/^https?:\/\//i.test(videoURL)) {
+    toast("Video URL မမှန်ပါ");
+    return;
+  }
+
+  destroyHLSPlayer();
+
+  player.pause();
+  player.removeAttribute("src");
+  player.load();
+
+  playerTitle.textContent =
+    String(name || "").trim() || "CMFLIX";
+
+  setPlayerStatus(
+    "Video ပြင်ဆင်နေသည်…",
+    true
+  );
+
+  if (!playerDialog.open) {
+    playerDialog.showModal();
+  }
+
   const isHLS =
     type === "m3u8" ||
     (
       type === "auto" &&
-      /\.m3u8($|\?)/i.test(url)
+      /\.m3u8($|\?)/i.test(videoURL)
     );
 
-  playerTitle.textContent =
-    name || "CMFLIX";
+  const startPlayback = () => {
+    setPlayerStatus("", false);
+
+    player.play().catch(() => {
+      /*
+       * Browser autoplay policy က block လုပ်ရင်
+       * user က native play button နှိပ်နိုင်ပါတယ်။
+       */
+    });
+  };
 
   if (isHLS) {
+    /*
+     * Safari/iPhone မှာ native HLS ကို ဦးစားပေးပါမယ်။
+     */
     if (
       player.canPlayType(
         "application/vnd.apple.mpegurl"
       )
     ) {
-      player.src = url;
-    } else if (window.Hls?.isSupported()) {
+      player.src = videoURL;
+      player.load();
+
+      player.addEventListener(
+        "loadedmetadata",
+        startPlayback,
+        { once: true }
+      );
+
+      return;
+    }
+
+    /*
+     * Chrome, Firefox, Android browser တွေအတွက်
+     * hls.js ကိုသုံးပါမယ်။
+     */
+    if (window.Hls?.isSupported()) {
       state.hls = new window.Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 30
+        backBufferLength: 60,
+        maxBufferLength: 30
       });
 
-      state.hls.loadSource(url);
+      state.hls.loadSource(videoURL);
       state.hls.attachMedia(player);
+
+      state.hls.on(
+        window.Hls.Events.MANIFEST_PARSED,
+        startPlayback
+      );
 
       state.hls.on(
         window.Hls.Events.ERROR,
@@ -838,72 +915,61 @@ function playVideo(url, type = "auto", name = "") {
             data.type ===
             window.Hls.ErrorTypes.NETWORK_ERROR
           ) {
-            state.hls.startLoad();
-          } else if (
+            setPlayerStatus(
+              "Network ပြန်လည်ချိတ်ဆက်နေသည်…",
+              true
+            );
+
+            state.hls?.startLoad();
+            return;
+          }
+
+          if (
             data.type ===
             window.Hls.ErrorTypes.MEDIA_ERROR
           ) {
-            state.hls.recoverMediaError();
-          } else {
-            toast("Video ဖွင့်၍မရပါ");
-            state.hls.destroy();
-            state.hls = null;
+            setPlayerStatus(
+              "Video ပြန်လည်ပြင်ဆင်နေသည်…",
+              true
+            );
+
+            state.hls?.recoverMediaError();
+            return;
           }
+
+          setPlayerStatus(
+            "Video ဖွင့်၍မရပါ။ နောက်တစ်ကြိမ် ပြန်ကြိုးစားပါ။",
+            true
+          );
+
+          destroyHLSPlayer();
         }
       );
-    } else {
-      toast("ဤ browser သည် HLS မထောက်ပံ့ပါ");
+
       return;
     }
-  } else {
-    player.src = url;
-  }
 
-  if (!playerDialog.open) {
-    playerDialog.showModal();
-  }
+    setPlayerStatus(
+      "ဤ browser သည် HLS video ကို မထောက်ပံ့ပါ။",
+      true
+    );
 
-  player.play().catch(() => {
-    // Browser autoplay policy ကြောင့် block ဖြစ်ရင်
-    // user က native play button ကိုနှိပ်နိုင်ပါတယ်။
-  });
+    return;
+  }
 
   /*
-   * Android browser မှာ Play button နှိပ်မှုအတွင်း
-   * native fullscreen ဝင်ရန်ကြိုးစားမယ်။
-   *
-   * Browser ကခွင့်မပြုရင် CSS full-screen player
-   * အဖြစ်ဆက်ပြပါမယ်။
+   * MP4 သို့မဟုတ် browser ကတိုက်ရိုက်ဖွင့်နိုင်တဲ့ video။
    */
-  const isMobile =
-    window.matchMedia("(max-width: 760px)").matches;
+  player.src = videoURL;
+  player.load();
 
-  if (isMobile) {
-    if (
-      typeof player.webkitEnterFullscreen ===
-      "function"
-    ) {
-      try {
-        player.webkitEnterFullscreen();
-      } catch {
-        // iPhone မှာ metadata မရသေးလျှင်
-        // CSS full-screen dialog ကို fallback သုံးမယ်။
-      }
-    } else if (
-      typeof player.requestFullscreen ===
-      "function"
-    ) {
-      player
-        .requestFullscreen({
-          navigationUI: "hide"
-        })
-        .catch(() => {
-          // Fullscreen permission မရရင်
-          // CSS full-screen dialog ကို fallback သုံးမယ်။
-        });
-    }
-  }
+  player.addEventListener(
+    "loadedmetadata",
+    startPlayback,
+    { once: true }
+  );
 }
+
 
 
 function parseEpisodes(text) {
@@ -1166,19 +1232,7 @@ async function renderTitleEditor(id = null) {
         ${field("original_title", "Original title", item.original_title)}
         ${field("release_date", "Release date", item.release_date)}
         ${field("year", "Year", item.year, false, "number")}
-        <label class="field">
-          <span>Rating</span>
-          <input
-            name="rating"
-            type="number"
-            value="${escapeHTML(item.rating ?? "")}"
-            min="0"
-            max="10"
-            step="0.1"
-            inputmode="decimal"
-            placeholder="ဥပမာ 5.2"
-          >
-        </label>
+        ${field("rating", "Rating", item.rating, false, "number")}
         ${field("poster_url", "Poster URL", item.poster_url, false, "url")}
         ${field("backdrop_url", "Backdrop URL", item.backdrop_url, false, "url")}
         ${field("genres", "Genres", item.genres)}
@@ -1553,16 +1607,57 @@ document.querySelector("[data-close-dialog]")
   .addEventListener("click", () => authDialog.close());
 
 document.querySelector("[data-close-player]")
-  .addEventListener("click", () => {
-    player.pause();
+  .addEventListener("click", closePlayer);
 
-    if (state.hls) {
-      state.hls.destroy();
-      state.hls = null;
+playerDialog.addEventListener("cancel", event => {
+  event.preventDefault();
+  closePlayer();
+});
+
+playerFullscreen.addEventListener("click", async () => {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return;
     }
 
-    playerDialog.close();
-  });
+    if (typeof player.requestFullscreen === "function") {
+      await player.requestFullscreen({
+        navigationUI: "hide"
+      });
+
+      return;
+    }
+
+    if (
+      typeof player.webkitEnterFullscreen ===
+      "function"
+    ) {
+      player.webkitEnterFullscreen();
+    }
+  } catch {
+    toast("Fullscreen ဖွင့်၍မရပါ");
+  }
+});
+
+player.addEventListener("waiting", () => {
+  setPlayerStatus("Buffering…", true);
+});
+
+player.addEventListener("playing", () => {
+  setPlayerStatus("", false);
+});
+
+player.addEventListener("canplay", () => {
+  setPlayerStatus("", false);
+});
+
+player.addEventListener("error", () => {
+  setPlayerStatus(
+    "Video ဖွင့်၍မရပါ။ URL သို့မဟုတ် server ကိုစစ်ပါ။",
+    true
+  );
+});
 
 authContent.addEventListener("click", async event => {
   if (event.target.closest("#goAdmin")) {
