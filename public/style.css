@@ -661,10 +661,19 @@ body {
 .genre-filter,
 .detail-genres {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 9px;
-  overflow-x: auto;
+  overflow: visible;
   padding: 1px 1px 18px;
-  scrollbar-width: none;
+}
+
+.genre-chip {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .genre-filter::-webkit-scrollbar,
