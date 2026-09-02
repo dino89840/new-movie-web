@@ -1042,7 +1042,7 @@ const offset = (page - 1) * limit;
   const cacheURL = new URL(url.toString());
 
   // အဟောင်း cache နဲ့မရောစေရန်
-  cacheURL.searchParams.set("_dataVersion", "3");
+  cacheURL.searchParams.set("_dataVersion", "4");
 
   const cacheKey = new Request(cacheURL.toString(), {
     method: "GET"
@@ -1137,7 +1137,7 @@ async function publicTitle(request, env, slug, context) {
   const cacheURL = new URL(request.url);
 
   // အဟောင်း cast မပါတဲ့ cache ကိုရှောင်ရန်
-  cacheURL.searchParams.set("_dataVersion", "3");
+  cacheURL.searchParams.set("_dataVersion", "4");
 
   const cacheKey = new Request(cacheURL.toString(), {
     method: "GET"
