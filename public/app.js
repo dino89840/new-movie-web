@@ -555,6 +555,65 @@ async function renderHome(category) {
   paintGrid();
 }
 
+function movieCard(item) {
+  const categoryLabel =
+    item.category === "series"
+      ? "SERIES"
+      : item.category === "lugyi"
+        ? "18+"
+        : "MOVIE";
+
+  const year =
+    item.year ||
+    (item.release_date
+      ? String(item.release_date).slice(0, 4)
+      : "");
+
+  const rating = Number(item.rating || 0);
+
+  return `
+    <article
+      class="movie-card"
+      data-open-title="${escapeHTML(item.slug || "")}"
+      role="button"
+      tabindex="0"
+      aria-label="${escapeHTML(item.title || "Movie")}"
+    >
+      <div class="poster-wrap protected-media">
+        ${
+          item.poster_url
+            ? `
+              <img
+                src="${escapeHTML(item.poster_url)}"
+                alt="${escapeHTML(item.title || "")}"
+                loading="lazy"
+                decoding="async"
+              >
+            `
+            : `
+              <div class="poster-placeholder">
+                No poster
+              </div>
+            `
+        }
+
+        <span class="type-badge">
+          ${categoryLabel}
+        </span>
+      </div>
+
+      <div class="movie-info">
+        <h3>${escapeHTML(item.title || "Untitled")}</h3>
+
+        <p>
+          <span>${escapeHTML(year || "—")}</span>
+          <span>★ ${rating.toFixed(1)}</span>
+        </p>
+      </div>
+    </article>
+  `;
+}
+
 
 async function renderDetail(slug) {
   app.innerHTML = `
