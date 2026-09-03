@@ -1,4 +1,3 @@
-
 const app = document.querySelector("#app");
 const authDialog = document.querySelector("#authDialog");
 const authContent = document.querySelector("#authContent");
@@ -16,13 +15,30 @@ const state = {
   user: null,
   csrf: "",
   category: "movies",
+
+  /*
+   * လက်ရှိ HLS instance။
+   */
   hls: null,
+
+  /*
+   * Native HLS/MP4 loadedmetadata listener ကို
+   * video ပြောင်းချိန်မှာ ဖယ်ရှားနိုင်ဖို့ သိမ်းထားမယ်။
+   */
+  nativeReadyHandler: null,
+
+  /*
+   * Video တစ်ကားဖွင့်တိုင်း generation တိုးမယ်။
+   * အရင် video ရဲ့ async callback တွေက
+   * video အသစ်ကို မထိခိုက်နိုင်အောင် သုံးပါတယ်။
+   */
+  playbackGeneration: 0,
+  activeVideoURL: "",
+
   editing: null,
   parsedEpisodes: [],
   catalogObserver: null,
-  catalogRun: 0,
-  playToken: 0,
-  playerLoadedHandler: null
+  catalogRun: 0
 };
 
 const icons = {
@@ -1059,10 +1075,15 @@ async function renderFavorites() {
     return;
   }
 
-  app.innerHTML = `<section class="loading-card">Loading favorites…</section>`;
+  app.innerHTML = `
+    <section class="loading-card">
+      Loading favorites…
+    </section>
+  `;
 
   try {
     const data = await api("favorites");
+    const items = data.items || [];
 
     app.innerHTML = `
       <div class="section-header">
@@ -1071,87 +1092,38 @@ async function renderFavorites() {
 
       <div class="movie-grid">
         ${
-          data.items.length
-            ? data.items.map(favoriteCard).join("")
-            : `<section class="empty-card full">Favorite မရှိသေးပါ</section>`
+          items.length
+            ? items.map(item => `
+                <div
+                  class="favorite-entry"
+                  data-favorite-entry="${escapeHTML(item.id)}"
+                >
+                  ${movieCard(item)}
+
+                  <button
+                    type="button"
+                    class="button danger small favorite-remove-button"
+                    data-remove-favorite="${escapeHTML(item.id)}"
+                  >
+                    Favorite မှ ဖယ်ရှားမည်
+                  </button>
+                </div>
+              `).join("")
+            : `
+                <section class="empty-card full">
+                  Favorite မရှိသေးပါ
+                </section>
+              `
         }
       </div>
     `;
   } catch (error) {
-    app.innerHTML = `<section class="empty-card">${escapeHTML(error.message)}</section>`;
+    app.innerHTML = `
+      <section class="empty-card">
+        ${escapeHTML(error.message)}
+      </section>
+    `;
   }
-}
-
-// Favorite card — movieCard နဲ့ တူပေမယ့် remove button ပါ
-function favoriteCard(item) {
-  const categoryLabel =
-    item.category === "series"
-      ? "SERIES"
-      : item.category === "lugyi"
-        ? "18+"
-        : "MOVIE";
-
-  const year =
-    item.year ||
-    (item.release_date
-      ? String(item.release_date).slice(0, 4)
-      : "");
-
-  const rating = Number(item.rating || 0);
-
-  return `
-    <article class="movie-card favorite-card-wrap">
-      <button
-        type="button"
-        class="favorite-remove"
-        data-remove-favorite="${escapeHTML(item.id)}"
-        aria-label="Favorite ဖယ်ရှားမည်"
-        title="ဖယ်ရှားမည်"
-      >×</button>
-
-      <div
-        class="poster-wrap protected-media"
-        data-open-title="${escapeHTML(item.slug || "")}"
-        role="button"
-        tabindex="0"
-      >
-        ${
-          item.poster_url
-            ? `
-              <img
-                src="${escapeHTML(item.poster_url)}"
-                alt="${escapeHTML(item.title || "")}"
-                loading="lazy"
-                decoding="async"
-              >
-            `
-            : `
-              <div class="poster-placeholder">
-                No poster
-              </div>
-            `
-        }
-
-        <span class="type-badge">
-          ${categoryLabel}
-        </span>
-      </div>
-
-      <div
-        class="movie-info"
-        data-open-title="${escapeHTML(item.slug || "")}"
-        role="button"
-        tabindex="0"
-      >
-        <h3>${escapeHTML(item.title || "Untitled")}</h3>
-
-        <p>
-          <span>${escapeHTML(year || "—")}</span>
-          <span>★ ${rating.toFixed(1)}</span>
-        </p>
-      </div>
-    </article>
-  `;
 }
 
 function openAuth(mode = "login") {
@@ -1253,28 +1225,92 @@ function openAuth(mode = "login") {
 
 function setPlayerStatus(message = "", visible = false) {
   playerStatus.textContent = message;
-  playerStatus.classList.toggle("show", visible);
+  playerStatus.classList.toggle(
+    "show",
+    Boolean(visible && message)
+  );
 }
 
 function destroyHLSPlayer() {
-  if (state.hls) {
-    state.hls.destroy();
-    state.hls = null;
+  /*
+   * Native HLS/MP4 listener အဟောင်းရှိရင်
+   * အသစ်ဖွင့်မယ့် video ကို မထိခိုက်ခင် ဖယ်ရှားပါမယ်။
+   */
+  if (state.nativeReadyHandler) {
+    player.removeEventListener(
+      "loadedmetadata",
+      state.nativeReadyHandler
+    );
+
+    state.nativeReadyHandler = null;
+  }
+
+  /*
+   * Global reference ကို အရင် null လုပ်ထားတာကြောင့်
+   * destroy လုပ်နေစဉ် callback ထပ်ဝင်လာရင်
+   * instance အသစ်ကို မထိနိုင်ပါ။
+   */
+  const oldHLS = state.hls;
+  state.hls = null;
+
+  if (!oldHLS) {
+    return;
+  }
+
+  try {
+    oldHLS.stopLoad();
+  } catch {
+    /*
+     * HLS state အရ stopLoad မရလည်း ဆက်ရှင်းပါမယ်။
+     */
+  }
+
+  try {
+    oldHLS.detachMedia();
+  } catch {
+    /*
+     * Media မ attach ရသေးရင် detachMedia error ကို
+     * လျစ်လျူရှုနိုင်ပါတယ်။
+     */
+  }
+
+  try {
+    oldHLS.destroy();
+  } catch (error) {
+    console.warn("HLS cleanup error:", error);
   }
 }
 
-function closePlayer() {
-  state.playToken = (state.playToken || 0) + 1;
-  destroyHLSPlayer();
-  detachPlayerListeners();
-
+function resetVideoElement() {
   player.pause();
-  player.removeAttribute("src");
-  while (player.firstChild) {
-    player.removeChild(player.firstChild);
-  }
-  player.load();
 
+  player.removeAttribute("src");
+
+  /*
+   * HTML ထဲမှာ source element ထည့်ခဲ့ဖူးရင်ပါ
+   * ဖယ်ရှားပေးပါမယ်။
+   */
+  player
+    .querySelectorAll("source")
+    .forEach(source => source.remove());
+
+  /*
+   * Browser decoder/network request အဟောင်းတွေကို
+   * ရပ်စေဖို့ load() ပြန်ခေါ်ပါတယ်။
+   */
+  player.load();
+}
+
+function closePlayer() {
+  /*
+   * ဖွင့်နေတဲ့ playback callback အားလုံးကို
+   * stale ဖြစ်သွားအောင် generation တိုးပါမယ်။
+   */
+  state.playbackGeneration++;
+  state.activeVideoURL = "";
+
+  destroyHLSPlayer();
+  resetVideoElement();
   setPlayerStatus("", false);
 
   if (document.fullscreenElement) {
@@ -1294,66 +1330,133 @@ function playVideo(url, type = "auto", name = "") {
     return;
   }
 
-  // ဒီ playback အတွက် generation token အသစ်တစ်ခု
-  const token = (state.playToken || 0) + 1;
-  state.playToken = token;
+  /*
+   * ဒီ play request ရဲ့ ကိုယ်ပိုင် generation။
+   * နောက် video ဖွင့်လိုက်တာနဲ့ ဒီ token က stale ဖြစ်သွားမယ်။
+   */
+  const playbackGeneration =
+    ++state.playbackGeneration;
 
-  const isCurrent = () => state.playToken === token;
-
-  // အရင် playback ကို လုံးဝ ရှင်းလင်း
   destroyHLSPlayer();
-  detachPlayerListeners();
+  resetVideoElement();
 
-  player.pause();
-  player.removeAttribute("src");
-  // source element ရှိရင်လည်း ဖယ်
-  while (player.firstChild) {
-    player.removeChild(player.firstChild);
-  }
-  player.load();
+  state.activeVideoURL = videoURL;
+
+  const isCurrentPlayback = () =>
+    playbackGeneration ===
+      state.playbackGeneration &&
+    state.activeVideoURL === videoURL &&
+    playerDialog.open;
 
   playerTitle.textContent =
     String(name || "").trim() || "CMFLIX";
 
-  setPlayerStatus("Video ပြင်ဆင်နေသည်…", true);
+  setPlayerStatus(
+    "Video ပြင်ဆင်နေသည်…",
+    true
+  );
 
   if (!playerDialog.open) {
     playerDialog.showModal();
   }
 
+  const normalizedType =
+    String(type || "auto").toLowerCase();
+
   const isHLS =
-    type === "m3u8" ||
-    (type === "auto" && /\.m3u8($|\?)/i.test(videoURL));
+    normalizedType === "m3u8" ||
+    (
+      normalizedType === "auto" &&
+      /\.m3u8(?:$|[?#])/i.test(videoURL)
+    );
 
-  const startPlayback = () => {
-    if (!isCurrent()) return;
+  let playbackStarted = false;
 
-    setPlayerStatus("", false);
-
-    player.play().catch(() => {
-      /* autoplay policy block ဖြစ်ရင် user က play နှိပ်နိုင် */
-    });
-  };
-
-  // native metadata handler (MP4 + Safari HLS)
-  const onLoadedMetadata = () => {
-    if (!isCurrent()) return;
-    startPlayback();
-  };
-
-  // ဒီ playback ရဲ့ handler ကို state ထဲသိမ်း၊ နောက်ကြိမ်ဖြုတ်ဖို့
-  state.playerLoadedHandler = onLoadedMetadata;
-
-  if (isHLS) {
-    // Safari/iPhone — native HLS ဦးစားပေး
-    if (player.canPlayType("application/vnd.apple.mpegurl")) {
-      player.src = videoURL;
-      player.load();
-      player.addEventListener("loadedmetadata", onLoadedMetadata);
+  const startPlayback = async () => {
+    if (
+      !isCurrentPlayback() ||
+      playbackStarted
+    ) {
       return;
     }
 
-    // Chrome, Firefox, Android — hls.js
+    playbackStarted = true;
+
+    /*
+     * once:true ကြောင့် listener က အလိုအလျောက်ပျောက်ပေမယ့်
+     * state reference ကိုပါ ရှင်းထားပါတယ်။
+     */
+    if (
+      state.nativeReadyHandler ===
+      startPlayback
+    ) {
+      state.nativeReadyHandler = null;
+    }
+
+    setPlayerStatus("", false);
+
+    try {
+      await player.play();
+    } catch (error) {
+      /*
+       * Video မြန်မြန်ပြောင်းဖွင့်တဲ့အခါ
+       * play promise အဟောင်းက AbortError တက်နိုင်ပါတယ်။
+       */
+      if (
+        error?.name === "AbortError" ||
+        error?.name === "NotAllowedError"
+      ) {
+        return;
+      }
+
+      if (isCurrentPlayback()) {
+        console.error(
+          "Video play error:",
+          error
+        );
+
+        setPlayerStatus(
+          "Play ကိုနှိပ်ပြီး ပြန်ဖွင့်ကြည့်ပါ။",
+          true
+        );
+      }
+    }
+  };
+
+  const useNativeSource = () => {
+    if (!isCurrentPlayback()) {
+      return;
+    }
+
+    state.nativeReadyHandler =
+      startPlayback;
+
+    player.addEventListener(
+      "loadedmetadata",
+      startPlayback,
+      { once: true }
+    );
+
+    player.src = videoURL;
+    player.load();
+  };
+
+  if (isHLS) {
+    /*
+     * Safari/iPhone native HLS။
+     */
+    if (
+      player.canPlayType(
+        "application/vnd.apple.mpegurl"
+      )
+    ) {
+      useNativeSource();
+      return;
+    }
+
+    /*
+     * Chrome, Firefox, Android စတဲ့ browser များအတွက် HLS.js။
+     */
     if (window.Hls?.isSupported()) {
       const hls = new window.Hls({
         enableWorker: true,
@@ -1364,63 +1467,173 @@ function playVideo(url, type = "auto", name = "") {
 
       state.hls = hls;
 
-      hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-        if (!isCurrent() || state.hls !== hls) {
+      let networkRecoveryCount = 0;
+      let mediaRecoveryCount = 0;
+
+      const isCurrentHLS = () =>
+        isCurrentPlayback() &&
+        state.hls === hls;
+
+      const destroyThisHLS = () => {
+        if (state.hls === hls) {
+          state.hls = null;
+        }
+
+        try {
+          hls.stopLoad();
+        } catch {
+          /*
+           * Ignore cleanup error.
+           */
+        }
+
+        try {
+          hls.detachMedia();
+        } catch {
+          /*
+           * Ignore cleanup error.
+           */
+        }
+
+        try {
           hls.destroy();
-          return;
+        } catch (error) {
+          console.warn(
+            "HLS destroy error:",
+            error
+          );
         }
-        startPlayback();
-      });
+      };
 
-      hls.on(window.Hls.Events.ERROR, (_event, data) => {
-        // ဒီ playback မဟုတ်တော့ရင် လျစ်လျူရှု
-        if (!isCurrent() || state.hls !== hls) return;
-        if (!data.fatal) return;
+      hls.on(
+        window.Hls.Events.MEDIA_ATTACHED,
+        () => {
+          if (!isCurrentHLS()) {
+            return;
+          }
 
-        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
-          setPlayerStatus("Network ပြန်လည်ချိတ်ဆက်နေသည်…", true);
-          hls.startLoad();
-          return;
+          hls.loadSource(videoURL);
         }
+      );
 
-        if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
-          setPlayerStatus("Video ပြန်လည်ပြင်ဆင်နေသည်…", true);
-          hls.recoverMediaError();
-          return;
+      hls.on(
+        window.Hls.Events.MANIFEST_PARSED,
+        () => {
+          if (!isCurrentHLS()) {
+            return;
+          }
+
+          startPlayback();
         }
+      );
 
-        setPlayerStatus(
-          "Video ဖွင့်၍မရပါ။ နောက်တစ်ကြိမ် ပြန်ကြိုးစားပါ။",
-          true
-        );
-        destroyHLSPlayer();
-      });
+      hls.on(
+        window.Hls.Events.ERROR,
+        (_event, data) => {
+          /*
+           * Instance အဟောင်းက callback ဖြစ်ရင်
+           * ဘာမှမလုပ်ပါ။
+           */
+          if (!isCurrentHLS()) {
+            return;
+          }
 
-      // loadSource/attachMedia ကို token စစ်ပြီးမှ
+          if (!data?.fatal) {
+            return;
+          }
+
+          if (
+            data.type ===
+            window.Hls.ErrorTypes.NETWORK_ERROR
+          ) {
+            networkRecoveryCount++;
+
+            if (networkRecoveryCount <= 2) {
+              setPlayerStatus(
+                "Network ပြန်လည်ချိတ်ဆက်နေသည်…",
+                true
+              );
+
+              const retryDelay =
+                networkRecoveryCount * 700;
+
+              setTimeout(() => {
+                if (isCurrentHLS()) {
+                  hls.startLoad();
+                }
+              }, retryDelay);
+
+              return;
+            }
+
+            setPlayerStatus(
+              "Video server နှင့် ချိတ်ဆက်၍မရပါ။ Link သို့မဟုတ် CORS ကိုစစ်ပါ။",
+              true
+            );
+
+            destroyThisHLS();
+            return;
+          }
+
+          if (
+            data.type ===
+            window.Hls.ErrorTypes.MEDIA_ERROR
+          ) {
+            mediaRecoveryCount++;
+
+            if (mediaRecoveryCount <= 2) {
+              setPlayerStatus(
+                "Video ပြန်လည်ပြင်ဆင်နေသည်…",
+                true
+              );
+
+              setTimeout(() => {
+                if (isCurrentHLS()) {
+                  hls.recoverMediaError();
+                }
+              }, mediaRecoveryCount * 300);
+
+              return;
+            }
+
+            setPlayerStatus(
+              "Video format ကို browser က ဖတ်၍မရပါ။",
+              true
+            );
+
+            destroyThisHLS();
+            return;
+          }
+
+          setPlayerStatus(
+            "Video ဖွင့်၍မရပါ။ Link နှင့် video server ကိုစစ်ပါ။",
+            true
+          );
+
+          destroyThisHLS();
+        }
+      );
+
+      /*
+       * attachMedia ကို အရင်လုပ်ပြီး MEDIA_ATTACHED
+       * ဖြစ်မှ loadSource လုပ်ပါမယ်။
+       */
       hls.attachMedia(player);
-      hls.loadSource(videoURL);
       return;
     }
 
-    setPlayerStatus("ဤ browser သည် HLS video ကို မထောက်ပံ့ပါ။", true);
+    setPlayerStatus(
+      "ဤ browser သည် HLS video ကို မထောက်ပံ့ပါ။",
+      true
+    );
+
     return;
   }
 
-  // MP4 သို့မဟုတ် browser တိုက်ရိုက်ဖွင့်နိုင်တဲ့ video
-  player.src = videoURL;
-  player.load();
-  player.addEventListener("loadedmetadata", onLoadedMetadata);
-}
-
-// player ရဲ့ တစ်ကြိမ်သုံး listener တွေကို ဖြုတ်
-function detachPlayerListeners() {
-  if (state.playerLoadedHandler) {
-    player.removeEventListener(
-      "loadedmetadata",
-      state.playerLoadedHandler
-    );
-    state.playerLoadedHandler = null;
-  }
+  /*
+   * MP4 သို့မဟုတ် browser က တိုက်ရိုက်ဖွင့်နိုင်တဲ့ video။
+   */
+  useNativeSource();
 }
 
 
@@ -1453,7 +1666,10 @@ function positiveInteger(value, fallback = 1) {
     : fallback;
 }
 
-function parseEpisodes(text) {
+function parseEpisodes(
+  text,
+  existingEpisodes = []
+) {
   const input = String(text || "").trim();
 
   if (!input) {
@@ -1461,10 +1677,12 @@ function parseEpisodes(text) {
   }
 
   /*
-   * JSON input ကိုအရင်စမ်းမယ်။
+   * JSON input ဖြစ်ပြီး episode number ပါပြီးသားဆိုရင်
+   * မူရင်းနံပါတ်အတိုင်း normalize လုပ်ပါမယ်။
    */
   try {
     const json = JSON.parse(input);
+
     const rows = Array.isArray(json)
       ? json
       : json?.episodes;
@@ -1484,13 +1702,34 @@ function parseEpisodes(text) {
     .filter(Boolean);
 
   const episodes = [];
+
+  /*
+   * Season တစ်ခုချင်းစီရဲ့ ရှိပြီးသား
+   * အမြင့်ဆုံး episode number နောက်က ဆက်စပါမယ်။
+   */
   const nextEpisodeBySeason = new Map();
 
+  for (const existing of existingEpisodes || []) {
+    const season = positiveInteger(
+      existing.season_number,
+      1
+    );
+
+    const episode = positiveInteger(
+      existing.episode_number,
+      1
+    );
+
+    const currentNext =
+      nextEpisodeBySeason.get(season) || 1;
+
+    nextEpisodeBySeason.set(
+      season,
+      Math.max(currentNext, episode + 1)
+    );
+  }
+
   for (const line of lines) {
-    /*
-     * Comma ကို URL separator ထဲမထည့်ထားပါ။
-     * Four_Hands,_Two_Sonatas လို URL တွေ အပြည့်ရပါမယ်။
-     */
     const rawURLs =
       line.match(/\bhttps?:\/\/[^\s<>"']+/gi) || [];
 
@@ -1502,17 +1741,14 @@ function parseEpisodes(text) {
       continue;
     }
 
-    /*
-     * Filename ထဲက S01E02, S1_E2၊
-     * စာသားထဲက Season 1 Episode 2 တွေကိုပါ ဖတ်နိုင်မယ်။
-     */
     let readableLine = line;
 
     try {
-      readableLine = decodeURIComponent(line);
+      readableLine =
+        decodeURIComponent(line);
     } catch {
       /*
-       * Malformed URI ဖြစ်ရင် မူရင်းစာသားကိုသုံးမယ်။
+       * Malformed URI ဖြစ်ရင် မူရင်းကိုသုံးမယ်။
        */
     }
 
@@ -1529,8 +1765,15 @@ function parseEpisodes(text) {
       1
     );
 
+    /*
+     * E3 လို explicit number ပါရင် E3 ကိုသုံးမယ်။
+     * URL သက်သက်ဆိုရင် ရှိပြီးသားအမြင့်ဆုံးနောက်က ဆက်မယ်။
+     */
     let episode = episodeMatch
-      ? positiveInteger(episodeMatch[1], 1)
+      ? positiveInteger(
+          episodeMatch[1],
+          1
+        )
       : positiveInteger(
           nextEpisodeBySeason.get(season),
           1
@@ -1540,17 +1783,25 @@ function parseEpisodes(text) {
       episodes.push({
         season_number: season,
         episode_number: episode,
-        episode_title: `Episode ${episode}`,
+        episode_title:
+          `Episode ${episode}`,
         video_url: url,
-        video_type: /\.m3u8(?:$|[?#])/i.test(url)
-          ? "m3u8"
-          : "auto"
+        video_type:
+          /\.m3u8(?:$|[?#])/i.test(url)
+            ? "m3u8"
+            : "auto"
       });
 
       episode++;
     }
 
-    nextEpisodeBySeason.set(season, episode);
+    const currentNext =
+      nextEpisodeBySeason.get(season) || 1;
+
+    nextEpisodeBySeason.set(
+      season,
+      Math.max(currentNext, episode)
+    );
   }
 
   return normalizeParsedEpisodes(episodes);
@@ -1906,47 +2157,42 @@ ${field(
 
   document.querySelector("#parseButton")
     .addEventListener("click", () => {
-      const parsed = parseEpisodes(
-        document.querySelector("#episodeBulk").value
+      const bulkInput =
+        document.querySelector("#episodeBulk");
+
+      const newEpisodes = parseEpisodes(
+        bulkInput.value,
+        state.parsedEpisodes
       );
 
-      if (!parsed.length) {
-        toast("Episode မတွေ့ပါ");
+      if (!newEpisodes.length) {
+        toast("ဖတ်လို့ရတဲ့ episode link မတွေ့ပါ");
         return;
       }
 
-      // အဟောင်းတွေနဲ့ အသစ်တွေ ပေါင်းစည်း (merge)
-      const merged = new Map();
+      /*
+       * Existing episodes ကို အရင်ထည့်ပြီး
+       * အသစ်တွေကို နောက်မှထည့်ထားပါတယ်။
+       *
+       * Season/Episode တူရင် အသစ်က အဟောင်းကို update လုပ်မယ်။
+       * မတူရင် episode အသစ်အဖြစ် ထပ်ပေါင်းမယ်။
+       */
+      state.parsedEpisodes =
+        normalizeParsedEpisodes([
+          ...state.parsedEpisodes,
+          ...newEpisodes
+        ]);
 
-      // အရင်ရှိပြီးသား အပိုင်းတွေ အရင်ထည့်
-      for (const ep of state.parsedEpisodes) {
-        merged.set(
-          `${ep.season_number}:${ep.episode_number}`,
-          ep
-        );
-      }
-
-      // အသစ်တွေ ထပ်ထည့် (season:episode တူရင် အသစ်နဲ့ update)
-      let added = 0;
-      for (const ep of parsed) {
-        const key = `${ep.season_number}:${ep.episode_number}`;
-        if (!merged.has(key)) added++;
-        merged.set(key, ep);
-      }
-
-      state.parsedEpisodes = [...merged.values()].sort(
-        (a, b) =>
-          a.season_number - b.season_number ||
-          a.episode_number - b.episode_number
-      );
-
-      // ထည့်ပြီးရင် textarea ကို ရှင်း
-      document.querySelector("#episodeBulk").value = "";
+      /*
+       * Parse ပြီးသား input ကို ရှင်းထားပါမယ်။
+       * ထပ်နှိပ်မိပြီး duplicate ဖြစ်တာ လျော့စေပါတယ်။
+       */
+      bulkInput.value = "";
 
       renderEpisodePreview();
+
       toast(
-        `${added} အပိုင်းအသစ် ထည့်ပြီး၊ ` +
-        `စုစုပေါင်း ${state.parsedEpisodes.length} အပိုင်း`
+        `${newEpisodes.length} episodes ထပ်ပေါင်းပြီးပါပြီ`
       );
     });
 
@@ -2397,28 +2643,118 @@ document.addEventListener("dragstart", event => {
 window.addEventListener("hashchange", route);
 
 document.addEventListener("click", async event => {
-  const category = event.target.closest("[data-category]");
-  const page = event.target.closest("[data-page]");
-  const openTitle = event.target.closest("[data-open-title]");
-  const play = event.target.closest("[data-play-url]");
-  const favorite = event.target.closest("[data-favorite]");
-  const removeFav = event.target.closest("[data-remove-favorite]");
-  const edit = event.target.closest("[data-admin-edit]");
-  const remove = event.target.closest("[data-admin-delete]");
+  const category =
+    event.target.closest("[data-category]");
+
+  const page =
+    event.target.closest("[data-page]");
+
+  const openTitle =
+    event.target.closest("[data-open-title]");
+
+  const play =
+    event.target.closest("[data-play-url]");
+
+  const favorite =
+    event.target.closest("[data-favorite]");
+
+  const removeFavoriteButton =
+    event.target.closest(
+      "[data-remove-favorite]"
+    );
+
+  const edit =
+    event.target.closest("[data-admin-edit]");
+
+  const remove =
+    event.target.closest("[data-admin-delete]");
+
+  /*
+   * Favorite remove ကို အရင်စစ်ပါမယ်။
+   * Remove နှိပ်ချိန် detail page မဝင်အောင်
+   * ဒီ block ပြီးရင် return လုပ်ထားပါတယ်။
+   */
+  if (removeFavoriteButton) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const titleId =
+      removeFavoriteButton.dataset
+        .removeFavorite;
+
+    const accepted = confirm(
+      "ဒီဇာတ်ကားကို Favorite မှ ဖယ်ရှားမှာ သေချာပါသလား?"
+    );
+
+    if (!accepted) {
+      return;
+    }
+
+    removeFavoriteButton.disabled = true;
+
+    try {
+      await api(
+        `favorites/${encodeURIComponent(titleId)}`,
+        {
+          method: "DELETE"
+        }
+      );
+
+      const entry =
+        removeFavoriteButton.closest(
+          "[data-favorite-entry]"
+        );
+
+      entry?.remove();
+
+      const remaining =
+        document.querySelectorAll(
+          "[data-favorite-entry]"
+        );
+
+      if (!remaining.length) {
+        const grid =
+          document.querySelector(
+            ".movie-grid"
+          );
+
+        if (grid) {
+          grid.innerHTML = `
+            <section class="empty-card full">
+              Favorite မရှိသေးပါ
+            </section>
+          `;
+        }
+      }
+
+      toast(
+        "Favorite မှ ဖယ်ရှားပြီးပါပြီ"
+      );
+    } catch (error) {
+      removeFavoriteButton.disabled = false;
+      toast(error.message);
+    }
+
+    return;
+  }
 
   if (category) {
-    location.hash = `#/${category.dataset.category}`;
+    location.hash =
+      `#/${category.dataset.category}`;
   }
 
   if (page) {
-    location.hash = page.dataset.page === "favorites"
-      ? "#/favorites"
-      : `#/${state.category}`;
+    location.hash =
+      page.dataset.page === "favorites"
+        ? "#/favorites"
+        : `#/${state.category}`;
   }
 
   if (openTitle) {
     location.hash =
-      `#/watch/${encodeURIComponent(openTitle.dataset.openTitle)}`;
+      `#/watch/${encodeURIComponent(
+        openTitle.dataset.openTitle
+      )}`;
   }
 
   if (play) {
@@ -2430,67 +2766,57 @@ document.addEventListener("click", async event => {
   }
 
   if (favorite) {
-    try {
-      const button = favorite;
-      const isActive = button.classList.contains("is-favorited");
-
-      if (isActive) {
-        await api(
-          `favorites/${encodeURIComponent(button.dataset.favorite)}`,
-          { method: "DELETE" }
-        );
-        button.classList.remove("is-favorited");
-        toast("Favorite ဖယ်ရှားပြီးပါပြီ");
-      } else {
-        await api(
-          `favorites/${encodeURIComponent(button.dataset.favorite)}`,
-          { method: "POST" }
-        );
-        button.classList.add("is-favorited");
-        toast("Favorite ထည့်ပြီးပါပြီ");
-      }
-    } catch (error) {
-      toast(error.message);
-    }
-  }
-
-  if (removeFav) {
-    if (!confirm("ဤဇာတ်ကားကို Favorite မှ ဖယ်ရှားမှာ သေချာပါသလား?")) {
+    if (favorite.disabled) {
       return;
     }
 
+    favorite.disabled = true;
+
     try {
       await api(
-        `favorites/${encodeURIComponent(removeFav.dataset.removeFavorite)}`,
-        { method: "DELETE" }
+        `favorites/${encodeURIComponent(
+          favorite.dataset.favorite
+        )}`,
+        {
+          method: "POST"
+        }
       );
 
-      // card ကို ချက်ချင်း ဖယ်
-      removeFav.closest(".movie-card")?.remove();
-      toast("Favorite မှ ဖယ်ရှားပြီးပါပြီ");
+      toast("Favorite ထည့်ပြီးပါပြီ");
 
-      // list ဗလာဖြစ်သွားရင် message ပြ
-      const grid = document.querySelector(".movie-grid");
-      if (grid && !grid.querySelector(".movie-card")) {
-        grid.innerHTML =
-          `<section class="empty-card full">Favorite မရှိသေးပါ</section>`;
-      }
+      favorite.innerHTML = `
+        ${icons.heart}
+        Favorite ထည့်ပြီး
+      `;
     } catch (error) {
+      favorite.disabled = false;
       toast(error.message);
     }
   }
 
   if (edit) {
-    renderTitleEditor(edit.dataset.adminEdit);
+    renderTitleEditor(
+      edit.dataset.adminEdit
+    );
   }
 
   if (remove) {
-    if (!confirm("ဒီဇာတ်ကားကို ဖျက်မှာသေချာပါသလား?")) return;
+    const accepted = confirm(
+      "ဒီဇာတ်ကားကို ဖျက်မှာသေချာပါသလား?"
+    );
+
+    if (!accepted) {
+      return;
+    }
 
     try {
       await api(
-        `admin/titles/${encodeURIComponent(remove.dataset.adminDelete)}`,
-        { method: "DELETE" }
+        `admin/titles/${encodeURIComponent(
+          remove.dataset.adminDelete
+        )}`,
+        {
+          method: "DELETE"
+        }
       );
 
       toast("ဖျက်ပြီးပါပြီ");
@@ -2541,20 +2867,42 @@ playerFullscreen.addEventListener("click", async () => {
 });
 
 player.addEventListener("waiting", () => {
-  setPlayerStatus("Buffering…", true);
+  if (
+    playerDialog.open &&
+    state.activeVideoURL
+  ) {
+    setPlayerStatus("Buffering…", true);
+  }
 });
 
 player.addEventListener("playing", () => {
-  setPlayerStatus("", false);
+  if (
+    playerDialog.open &&
+    state.activeVideoURL
+  ) {
+    setPlayerStatus("", false);
+  }
 });
 
 player.addEventListener("canplay", () => {
-  setPlayerStatus("", false);
+  if (
+    playerDialog.open &&
+    state.activeVideoURL
+  ) {
+    setPlayerStatus("", false);
+  }
 });
 
 player.addEventListener("error", () => {
+  if (
+    !playerDialog.open ||
+    !state.activeVideoURL
+  ) {
+    return;
+  }
+
   setPlayerStatus(
-    "Video ဖွင့်၍မရပါ။ URL သို့မဟုတ် server ကိုစစ်ပါ။",
+    "Video ဖွင့်၍မရပါ။ URL၊ CORS သို့မဟုတ် video server ကိုစစ်ပါ။",
     true
   );
 });
@@ -2581,7 +2929,3 @@ authContent.addEventListener("click", async event => {
 });
 
 initialize();
-
-
-
-
