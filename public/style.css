@@ -2148,3 +2148,119 @@ body {
       );
   }
 }
+/* ======================================================
+   Login/Auth dialog box fix
+   ====================================================== */
+
+.modal {
+  width: min(94%, 420px);
+  padding: 26px 24px;
+  border-radius: 20px;
+}
+
+#authContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+#authContent h2 {
+  margin: 6px 0 0;
+  font-size: 22px;
+  text-align: center;
+}
+
+#authContent .muted {
+  margin: 0;
+  text-align: center;
+}
+
+#authContent .form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+}
+
+#authContent .field {
+  display: grid;
+  gap: 6px;
+}
+
+#authContent .field input {
+  width: 100%;
+}
+
+#authContent .button {
+  width: 100%;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-close {
+  margin-bottom: 4px;
+}
+
+@media (max-width: 680px) {
+  .modal {
+    width: calc(100% - 32px);
+    padding: 22px 18px;
+  }
+
+  #authContent h2 {
+    font-size: 20px;
+  }
+}
+
+/* ======================================================
+   Favorite remove button
+   ====================================================== */
+
+.favorite-card-wrap {
+  position: relative;
+}
+
+.favorite-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .7);
+  color: white;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background .2s ease,
+    transform .15s ease;
+}
+
+.favorite-remove:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.favorite-remove:active {
+  transform: scale(.9);
+}
+
+/* Detail page favorite button — active state */
+.button.secondary.is-favorited {
+  background: rgba(229, 9, 20, .2);
+  border-color: rgba(229, 9, 20, .6);
+  color: #ff5360;
+}
+
+.button.secondary.is-favorited svg {
+  fill: #ff5360;
+  stroke: #ff5360;
+}
