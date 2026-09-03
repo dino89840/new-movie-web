@@ -403,6 +403,7 @@ svg {
 .field {
   display: grid;
   gap: 7px;
+  min-width: 0;
 }
 
 .field span {
@@ -413,6 +414,107 @@ svg {
 .field textarea {
   min-height: 110px;
   resize: vertical;
+}
+
+/* ---------- Login/Register dialog ---------- */
+
+#authDialog {
+  position: relative;
+  width: min(
+    calc(100% - 24px),
+    460px
+  );
+  max-width: 460px;
+  padding: 0;
+  overflow: hidden;
+}
+
+#authDialog .modal-close {
+  position: absolute;
+  top: 11px;
+  right: 12px;
+  z-index: 3;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  float: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .06);
+  color: white;
+  line-height: 1;
+}
+
+#authDialog .modal-close:hover {
+  border-color: rgba(229, 9, 20, .65);
+  background: rgba(229, 9, 20, .2);
+}
+
+#authContent {
+  width: 100%;
+  min-width: 0;
+  padding: 30px;
+  display: grid;
+  gap: 17px;
+}
+
+#authContent h2 {
+  margin: 0;
+  padding-right: 46px;
+  font-size: 25px;
+  line-height: 1.25;
+}
+
+#authContent > p {
+  margin: -8px 0 0;
+  overflow-wrap: anywhere;
+}
+
+#authForm {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+#authForm .field,
+#authForm .field input {
+  width: 100%;
+  min-width: 0;
+}
+
+#authForm .field input {
+  display: block;
+}
+
+#authForm > .button,
+#authContent > .button {
+  width: 100%;
+  min-height: 44px;
+}
+
+#switchAuth {
+  margin-top: -3px;
+}
+
+@media (max-width: 680px) {
+  #authDialog {
+    width: calc(100% - 20px);
+    max-width: none;
+    border-radius: 17px;
+  }
+
+  #authContent {
+    padding:
+      26px
+      18px
+      20px;
+  }
+
+  #authContent h2 {
+    font-size: 22px;
+  }
 }
 
 .form-grid {
@@ -2148,119 +2250,41 @@ body {
       );
   }
 }
-/* ======================================================
-   Login/Auth dialog box fix
-   ====================================================== */
+/* ---------- Favorites ---------- */
 
-.modal {
-  width: min(94%, 420px);
-  padding: 26px 24px;
-  border-radius: 20px;
-}
-
-#authContent {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-#authContent h2 {
-  margin: 6px 0 0;
-  font-size: 22px;
-  text-align: center;
-}
-
-#authContent .muted {
-  margin: 0;
-  text-align: center;
-}
-
-#authContent .form-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin: 0;
-}
-
-#authContent .field {
+.favorite-entry {
+  min-width: 0;
   display: grid;
-  gap: 6px;
+  align-content: start;
+  gap: 8px;
 }
 
-#authContent .field input {
+.favorite-entry .movie-card {
+  min-width: 0;
+}
+
+.favorite-remove-button {
   width: 100%;
+  min-height: 38px;
+  padding-inline: 8px;
+  font-size: 12px;
 }
 
-#authContent .button {
-  width: 100%;
-  min-height: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.modal-close {
-  margin-bottom: 4px;
+.favorite-remove-button:disabled {
+  opacity: .55;
+  cursor: wait;
 }
 
 @media (max-width: 680px) {
-  .modal {
-    width: calc(100% - 32px);
-    padding: 22px 18px;
+  .favorite-entry {
+    gap: 6px;
   }
 
-  #authContent h2 {
-    font-size: 20px;
+  .favorite-remove-button {
+    min-height: 34px;
+    padding: 7px 4px;
+    border-radius: 9px;
+    font-size: 9px;
+    line-height: 1.25;
   }
-}
-
-/* ======================================================
-   Favorite remove button
-   ====================================================== */
-
-.favorite-card-wrap {
-  position: relative;
-}
-
-.favorite-remove {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 5;
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, .18);
-  border-radius: 50%;
-  background: rgba(0, 0, 0, .7);
-  color: white;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    background .2s ease,
-    transform .15s ease;
-}
-
-.favorite-remove:hover {
-  background: var(--danger);
-  border-color: var(--danger);
-}
-
-.favorite-remove:active {
-  transform: scale(.9);
-}
-
-/* Detail page favorite button — active state */
-.button.secondary.is-favorited {
-  background: rgba(229, 9, 20, .2);
-  border-color: rgba(229, 9, 20, .6);
-  color: #ff5360;
-}
-
-.button.secondary.is-favorited svg {
-  fill: #ff5360;
-  stroke: #ff5360;
 }
