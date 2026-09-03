@@ -1,3 +1,4 @@
+
 const app = document.querySelector("#app");
 const authDialog = document.querySelector("#authDialog");
 const authContent = document.querySelector("#authContent");
@@ -19,7 +20,9 @@ const state = {
   editing: null,
   parsedEpisodes: [],
   catalogObserver: null,
-  catalogRun: 0
+  catalogRun: 0,
+  playToken: 0,
+  playerLoadedHandler: null
 };
 
 const icons = {
@@ -1069,7 +1072,7 @@ async function renderFavorites() {
       <div class="movie-grid">
         ${
           data.items.length
-            ? data.items.map(movieCard).join("")
+            ? data.items.map(favoriteCard).join("")
             : `<section class="empty-card full">Favorite မရှိသေးပါ</section>`
         }
       </div>
@@ -1077,6 +1080,78 @@ async function renderFavorites() {
   } catch (error) {
     app.innerHTML = `<section class="empty-card">${escapeHTML(error.message)}</section>`;
   }
+}
+
+// Favorite card — movieCard နဲ့ တူပေမယ့် remove button ပါ
+function favoriteCard(item) {
+  const categoryLabel =
+    item.category === "series"
+      ? "SERIES"
+      : item.category === "lugyi"
+        ? "18+"
+        : "MOVIE";
+
+  const year =
+    item.year ||
+    (item.release_date
+      ? String(item.release_date).slice(0, 4)
+      : "");
+
+  const rating = Number(item.rating || 0);
+
+  return `
+    <article class="movie-card favorite-card-wrap">
+      <button
+        type="button"
+        class="favorite-remove"
+        data-remove-favorite="${escapeHTML(item.id)}"
+        aria-label="Favorite ဖယ်ရှားမည်"
+        title="ဖယ်ရှားမည်"
+      >×</button>
+
+      <div
+        class="poster-wrap protected-media"
+        data-open-title="${escapeHTML(item.slug || "")}"
+        role="button"
+        tabindex="0"
+      >
+        ${
+          item.poster_url
+            ? `
+              <img
+                src="${escapeHTML(item.poster_url)}"
+                alt="${escapeHTML(item.title || "")}"
+                loading="lazy"
+                decoding="async"
+              >
+            `
+            : `
+              <div class="poster-placeholder">
+                No poster
+              </div>
+            `
+        }
+
+        <span class="type-badge">
+          ${categoryLabel}
+        </span>
+      </div>
+
+      <div
+        class="movie-info"
+        data-open-title="${escapeHTML(item.slug || "")}"
+        role="button"
+        tabindex="0"
+      >
+        <h3>${escapeHTML(item.title || "Untitled")}</h3>
+
+        <p>
+          <span>${escapeHTML(year || "—")}</span>
+          <span>★ ${rating.toFixed(1)}</span>
+        </p>
+      </div>
+    </article>
+  `;
 }
 
 function openAuth(mode = "login") {
@@ -1189,10 +1264,15 @@ function destroyHLSPlayer() {
 }
 
 function closePlayer() {
+  state.playToken = (state.playToken || 0) + 1;
   destroyHLSPlayer();
+  detachPlayerListeners();
 
   player.pause();
   player.removeAttribute("src");
+  while (player.firstChild) {
+    player.removeChild(player.firstChild);
+  }
   player.load();
 
   setPlayerStatus("", false);
@@ -1214,19 +1294,28 @@ function playVideo(url, type = "auto", name = "") {
     return;
   }
 
+  // ဒီ playback အတွက် generation token အသစ်တစ်ခု
+  const token = (state.playToken || 0) + 1;
+  state.playToken = token;
+
+  const isCurrent = () => state.playToken === token;
+
+  // အရင် playback ကို လုံးဝ ရှင်းလင်း
   destroyHLSPlayer();
+  detachPlayerListeners();
 
   player.pause();
   player.removeAttribute("src");
+  // source element ရှိရင်လည်း ဖယ်
+  while (player.firstChild) {
+    player.removeChild(player.firstChild);
+  }
   player.load();
 
   playerTitle.textContent =
     String(name || "").trim() || "CMFLIX";
 
-  setPlayerStatus(
-    "Video ပြင်ဆင်နေသည်…",
-    true
-  );
+  setPlayerStatus("Video ပြင်ဆင်နေသည်…", true);
 
   if (!playerDialog.open) {
     playerDialog.showModal();
@@ -1234,128 +1323,106 @@ function playVideo(url, type = "auto", name = "") {
 
   const isHLS =
     type === "m3u8" ||
-    (
-      type === "auto" &&
-      /\.m3u8($|\?)/i.test(videoURL)
-    );
+    (type === "auto" && /\.m3u8($|\?)/i.test(videoURL));
 
   const startPlayback = () => {
+    if (!isCurrent()) return;
+
     setPlayerStatus("", false);
 
     player.play().catch(() => {
-      /*
-       * Browser autoplay policy က block လုပ်ရင်
-       * user က native play button နှိပ်နိုင်ပါတယ်။
-       */
+      /* autoplay policy block ဖြစ်ရင် user က play နှိပ်နိုင် */
     });
   };
 
+  // native metadata handler (MP4 + Safari HLS)
+  const onLoadedMetadata = () => {
+    if (!isCurrent()) return;
+    startPlayback();
+  };
+
+  // ဒီ playback ရဲ့ handler ကို state ထဲသိမ်း၊ နောက်ကြိမ်ဖြုတ်ဖို့
+  state.playerLoadedHandler = onLoadedMetadata;
+
   if (isHLS) {
-    /*
-     * Safari/iPhone မှာ native HLS ကို ဦးစားပေးပါမယ်။
-     */
-    if (
-      player.canPlayType(
-        "application/vnd.apple.mpegurl"
-      )
-    ) {
+    // Safari/iPhone — native HLS ဦးစားပေး
+    if (player.canPlayType("application/vnd.apple.mpegurl")) {
       player.src = videoURL;
       player.load();
-
-      player.addEventListener(
-        "loadedmetadata",
-        startPlayback,
-        { once: true }
-      );
-
+      player.addEventListener("loadedmetadata", onLoadedMetadata);
       return;
     }
 
-    /*
-     * Chrome, Firefox, Android browser တွေအတွက်
-     * hls.js ကိုသုံးပါမယ်။
-     */
+    // Chrome, Firefox, Android — hls.js
     if (window.Hls?.isSupported()) {
-      state.hls = new window.Hls({
+      const hls = new window.Hls({
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 60,
         maxBufferLength: 30
       });
 
-      state.hls.loadSource(videoURL);
-      state.hls.attachMedia(player);
+      state.hls = hls;
 
-      state.hls.on(
-        window.Hls.Events.MANIFEST_PARSED,
-        startPlayback
-      );
-
-      state.hls.on(
-        window.Hls.Events.ERROR,
-        (_event, data) => {
-          if (!data.fatal) {
-            return;
-          }
-
-          if (
-            data.type ===
-            window.Hls.ErrorTypes.NETWORK_ERROR
-          ) {
-            setPlayerStatus(
-              "Network ပြန်လည်ချိတ်ဆက်နေသည်…",
-              true
-            );
-
-            state.hls?.startLoad();
-            return;
-          }
-
-          if (
-            data.type ===
-            window.Hls.ErrorTypes.MEDIA_ERROR
-          ) {
-            setPlayerStatus(
-              "Video ပြန်လည်ပြင်ဆင်နေသည်…",
-              true
-            );
-
-            state.hls?.recoverMediaError();
-            return;
-          }
-
-          setPlayerStatus(
-            "Video ဖွင့်၍မရပါ။ နောက်တစ်ကြိမ် ပြန်ကြိုးစားပါ။",
-            true
-          );
-
-          destroyHLSPlayer();
+      hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+        if (!isCurrent() || state.hls !== hls) {
+          hls.destroy();
+          return;
         }
-      );
+        startPlayback();
+      });
 
+      hls.on(window.Hls.Events.ERROR, (_event, data) => {
+        // ဒီ playback မဟုတ်တော့ရင် လျစ်လျူရှု
+        if (!isCurrent() || state.hls !== hls) return;
+        if (!data.fatal) return;
+
+        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+          setPlayerStatus("Network ပြန်လည်ချိတ်ဆက်နေသည်…", true);
+          hls.startLoad();
+          return;
+        }
+
+        if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
+          setPlayerStatus("Video ပြန်လည်ပြင်ဆင်နေသည်…", true);
+          hls.recoverMediaError();
+          return;
+        }
+
+        setPlayerStatus(
+          "Video ဖွင့်၍မရပါ။ နောက်တစ်ကြိမ် ပြန်ကြိုးစားပါ။",
+          true
+        );
+        destroyHLSPlayer();
+      });
+
+      // loadSource/attachMedia ကို token စစ်ပြီးမှ
+      hls.attachMedia(player);
+      hls.loadSource(videoURL);
       return;
     }
 
-    setPlayerStatus(
-      "ဤ browser သည် HLS video ကို မထောက်ပံ့ပါ။",
-      true
-    );
-
+    setPlayerStatus("ဤ browser သည် HLS video ကို မထောက်ပံ့ပါ။", true);
     return;
   }
 
-  /*
-   * MP4 သို့မဟုတ် browser ကတိုက်ရိုက်ဖွင့်နိုင်တဲ့ video။
-   */
+  // MP4 သို့မဟုတ် browser တိုက်ရိုက်ဖွင့်နိုင်တဲ့ video
   player.src = videoURL;
   player.load();
-
-  player.addEventListener(
-    "loadedmetadata",
-    startPlayback,
-    { once: true }
-  );
+  player.addEventListener("loadedmetadata", onLoadedMetadata);
 }
+
+// player ရဲ့ တစ်ကြိမ်သုံး listener တွေကို ဖြုတ်
+function detachPlayerListeners() {
+  if (state.playerLoadedHandler) {
+    player.removeEventListener(
+      "loadedmetadata",
+      state.playerLoadedHandler
+    );
+    state.playerLoadedHandler = null;
+  }
+}
+
 
 
 
@@ -1839,11 +1906,48 @@ ${field(
 
   document.querySelector("#parseButton")
     .addEventListener("click", () => {
-      state.parsedEpisodes = parseEpisodes(
+      const parsed = parseEpisodes(
         document.querySelector("#episodeBulk").value
       );
+
+      if (!parsed.length) {
+        toast("Episode မတွေ့ပါ");
+        return;
+      }
+
+      // အဟောင်းတွေနဲ့ အသစ်တွေ ပေါင်းစည်း (merge)
+      const merged = new Map();
+
+      // အရင်ရှိပြီးသား အပိုင်းတွေ အရင်ထည့်
+      for (const ep of state.parsedEpisodes) {
+        merged.set(
+          `${ep.season_number}:${ep.episode_number}`,
+          ep
+        );
+      }
+
+      // အသစ်တွေ ထပ်ထည့် (season:episode တူရင် အသစ်နဲ့ update)
+      let added = 0;
+      for (const ep of parsed) {
+        const key = `${ep.season_number}:${ep.episode_number}`;
+        if (!merged.has(key)) added++;
+        merged.set(key, ep);
+      }
+
+      state.parsedEpisodes = [...merged.values()].sort(
+        (a, b) =>
+          a.season_number - b.season_number ||
+          a.episode_number - b.episode_number
+      );
+
+      // ထည့်ပြီးရင် textarea ကို ရှင်း
+      document.querySelector("#episodeBulk").value = "";
+
       renderEpisodePreview();
-      toast(`${state.parsedEpisodes.length} episodes parsed`);
+      toast(
+        `${added} အပိုင်းအသစ် ထည့်ပြီး၊ ` +
+        `စုစုပေါင်း ${state.parsedEpisodes.length} အပိုင်း`
+      );
     });
 
   document.querySelector("#tmdbButton")
@@ -2298,6 +2402,7 @@ document.addEventListener("click", async event => {
   const openTitle = event.target.closest("[data-open-title]");
   const play = event.target.closest("[data-play-url]");
   const favorite = event.target.closest("[data-favorite]");
+  const removeFav = event.target.closest("[data-remove-favorite]");
   const edit = event.target.closest("[data-admin-edit]");
   const remove = event.target.closest("[data-admin-delete]");
 
@@ -2326,10 +2431,50 @@ document.addEventListener("click", async event => {
 
   if (favorite) {
     try {
-      await api(`favorites/${encodeURIComponent(favorite.dataset.favorite)}`, {
-        method: "POST"
-      });
-      toast("Favorite ထည့်ပြီးပါပြီ");
+      const button = favorite;
+      const isActive = button.classList.contains("is-favorited");
+
+      if (isActive) {
+        await api(
+          `favorites/${encodeURIComponent(button.dataset.favorite)}`,
+          { method: "DELETE" }
+        );
+        button.classList.remove("is-favorited");
+        toast("Favorite ဖယ်ရှားပြီးပါပြီ");
+      } else {
+        await api(
+          `favorites/${encodeURIComponent(button.dataset.favorite)}`,
+          { method: "POST" }
+        );
+        button.classList.add("is-favorited");
+        toast("Favorite ထည့်ပြီးပါပြီ");
+      }
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+
+  if (removeFav) {
+    if (!confirm("ဤဇာတ်ကားကို Favorite မှ ဖယ်ရှားမှာ သေချာပါသလား?")) {
+      return;
+    }
+
+    try {
+      await api(
+        `favorites/${encodeURIComponent(removeFav.dataset.removeFavorite)}`,
+        { method: "DELETE" }
+      );
+
+      // card ကို ချက်ချင်း ဖယ်
+      removeFav.closest(".movie-card")?.remove();
+      toast("Favorite မှ ဖယ်ရှားပြီးပါပြီ");
+
+      // list ဗလာဖြစ်သွားရင် message ပြ
+      const grid = document.querySelector(".movie-grid");
+      if (grid && !grid.querySelector(".movie-card")) {
+        grid.innerHTML =
+          `<section class="empty-card full">Favorite မရှိသေးပါ</section>`;
+      }
     } catch (error) {
       toast(error.message);
     }
@@ -2436,3 +2581,7 @@ authContent.addEventListener("click", async event => {
 });
 
 initialize();
+
+
+
+
