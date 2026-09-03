@@ -1196,16 +1196,17 @@ async function publicTitle(
   slug,
   context
 ) {
+  const cookies = parseCookies(request);
+  const auth = cookies[SESSION_COOKIE]
+    ? await getAuth(request, env)
+    : null;
+
   const cache = caches.default;
   const cacheURL = new URL(request.url);
 
-  /*
-   * Data format ပြောင်းထားတာကြောင့်
-   * အဟောင်း cache မသုံးအောင် version တိုးထားပါတယ်။
-   */
   cacheURL.searchParams.set(
     "_dataVersion",
-    "5"
+    "6"
   );
 
   const cacheKey = new Request(
@@ -1215,11 +1216,16 @@ async function publicTitle(
     }
   );
 
-  const cached =
-    await cache.match(cacheKey);
+  /*
+   * Login မဝင်ထားတဲ့ user များအတွက်သာ public cache သုံးမယ်။
+   * Login ဝင်ထားသူအတွက် is_favorite ပါလာတာကြောင့် cache မသုံးပါ။
+   */
+  if (!auth) {
+    const cached = await cache.match(cacheKey);
 
-  if (cached) {
-    return cached;
+    if (cached) {
+      return cached;
+    }
   }
 
   const title = await env.DB.prepare(
@@ -1257,21 +1263,40 @@ async function publicTitle(
       .bind(title.id)
       .all();
 
+  let isFavorite = false;
+
+  if (auth) {
+    const favorite = await env.DB.prepare(
+      `SELECT title_id
+       FROM favorites
+       WHERE user_id = ?
+         AND title_id = ?
+       LIMIT 1`
+    )
+      .bind(auth.user.id, title.id)
+      .first();
+
+    isFavorite = Boolean(favorite);
+  }
+
+  const posterURL = proxiedTMDBImageURL(
+    title.poster_url,
+    "w500"
+  );
+
   const item = {
     ...title,
 
     genres:
       String(title.genres || "").trim(),
 
-    poster_url: proxiedTMDBImageURL(
-      title.poster_url,
-      "w500"
-    ),
+    /*
+     * Detail UI မှာ တစ်ပုံတည်းသုံးဖို့ poster ကိုပဲ main image လုပ်ထားမယ်။
+     */
+    poster_url: posterURL,
+    backdrop_url: "",
 
-    backdrop_url: proxiedTMDBImageURL(
-      title.backdrop_url,
-      "w1280"
-    ),
+    is_favorite: isFavorite,
 
     episodes:
       episodesResult.results || []
@@ -1281,26 +1306,28 @@ async function publicTitle(
     { item },
     200,
     {
-      /*
-       * ကြည့်ပြီးသား detail page ကို 5 minutes အတွင်း
-       * ပြန်ဖွင့်ရင် browser cache ကနေယူနိုင်ပါတယ်။
-       */
-      "cache-control":
-        "public, max-age=300, " +
-        "s-maxage=300, " +
-        "stale-while-revalidate=600"
+      "cache-control": auth
+        ? "no-store"
+        : (
+            "public, max-age=300, " +
+            "s-maxage=300, " +
+            "stale-while-revalidate=600"
+          )
     }
   );
 
-  context.waitUntil(
-    cache.put(
-      cacheKey,
-      response.clone()
-    )
-  );
+  if (!auth) {
+    context.waitUntil(
+      cache.put(
+        cacheKey,
+        response.clone()
+      )
+    );
+  }
 
   return response;
 }
+
 
 
 
