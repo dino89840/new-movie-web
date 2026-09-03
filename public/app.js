@@ -28,31 +28,13 @@ const icons = {
       <path d="m8 5 11 7-11 7Z"/>
     </svg>
   `,
-
   heart: `
     <svg viewBox="0 0 24 24">
       <path d="M20.8 4.6a5.4 5.4 0 0 0-7.6 0L12 5.8l-1.2-1.2a5.4
       5.4 0 0 0-7.6 7.6L12 21l8.8-8.8a5.4 5.4 0 0 0 0-7.6Z"/>
     </svg>
-  `,
-
-  bookmark: `
-    <svg viewBox="0 0 24 24">
-      <path d="M6 4h12v17l-6-4-6 4Z"/>
-    </svg>
-  `,
-
-  share: `
-    <svg viewBox="0 0 24 24">
-      <path d="M18 8a3 3 0 1 0-2.8-4"/>
-      <path d="M6 14a3 3 0 1 0 0-6"/>
-      <path d="M18 20a3 3 0 1 0-2.8-4"/>
-      <path d="M8.7 9.7l6.6-3.4"/>
-      <path d="M8.7 14.3l6.6 3.4"/>
-    </svg>
   `
 };
-
 
 function escapeHTML(value) {
   return String(value ?? "")
@@ -887,242 +869,173 @@ async function renderDetail(slug) {
     const item = data.item;
     const episodes = item.episodes || [];
     const genres = splitGenres(item.genres);
-    const posterURL = item.poster_url || "";
 
     app.innerHTML = `
       <section
-        class="detail-single-hero"
-        style="--poster:url('${escapeHTML(posterURL)}')"
+        class="detail-hero"
+        style="--backdrop:url('${escapeHTML(
+          item.backdrop_url ||
+          item.poster_url ||
+          ""
+        )}')"
       >
-        <div class="detail-top-actions">
-          <button
-            type="button"
-            class="detail-round-button"
-            data-back
-            aria-label="Back"
-          >
-            ‹
-          </button>
-
-          <div class="detail-top-right">
-            ${
-              state.user
-                ? `
-                  <button
-                    type="button"
-                    class="detail-round-button ${
-                      item.is_favorite ? "active" : ""
-                    }"
-                    data-favorite-toggle="${escapeHTML(item.id)}"
-                    data-favorited="${item.is_favorite ? "1" : "0"}"
-                    aria-label="Favorite"
-                    title="${
-                      item.is_favorite
-                        ? "Favorite မှ ဖျက်မည်"
-                        : "Favorite မှတ်မည်"
-                    }"
-                  >
-                    ${icons.bookmark}
-                  </button>
-                `
-                : ""
-            }
-
-            <button
-              type="button"
-              class="detail-round-button"
-              data-share-title="${escapeHTML(item.title)}"
-              aria-label="Share"
-            >
-              ${icons.share}
-            </button>
-          </div>
-        </div>
-
-        <div class="detail-poster-stage">
+        <div class="detail-content">
           ${
-            posterURL
+            item.poster_url
               ? `
                 <img
-                  class="detail-single-poster protected-media"
-                  src="${escapeHTML(posterURL)}"
+                  class="detail-poster"
+                  src="${escapeHTML(item.poster_url)}"
                   alt="${escapeHTML(item.title)}"
-                  decoding="async"
-                  fetchpriority="high"
                 >
               `
               : `
-                <div class="detail-single-poster poster-placeholder">
+                <div class="detail-poster poster-placeholder">
                   No poster
                 </div>
               `
           }
-        </div>
-      </section>
 
-      <section class="detail-info-panel">
-        <h1 class="detail-title">
-          ${escapeHTML(item.title)}
-        </h1>
+          <div class="detail-main">
+            <p class="detail-label">
+              ${
+                item.category === "series"
+                  ? "SERIES"
+                  : item.category === "lugyi"
+                    ? "18+"
+                    : "MOVIE"
+              }
+            </p>
 
-        <div class="detail-action-row">
-          ${
-            item.video_url
-              ? `
-                <button
-                  class="trailer-button"
-                  data-play-url="${escapeHTML(item.video_url)}"
-                  data-play-type="${escapeHTML(
-                    item.video_type || "auto"
-                  )}"
-                  data-play-name="${escapeHTML(item.title)}"
-                >
-                  ${icons.play}
-                  Watch Trailer
-                </button>
-              `
-              : `
-                <button
-                  class="trailer-button"
-                  type="button"
-                  disabled
-                >
-                  အောက်တွင်အပိုင်းရွေးပါ
-                </button>
-              `
-          }
+            <h1>${escapeHTML(item.title)}</h1>
 
-          <span class="rating-pill">
-            ★ ${Number(item.rating || 0).toFixed(1)}
-          </span>
+            <div class="meta">
+              <span>
+                ${escapeHTML(item.year || "—")}
+              </span>
 
-          <span class="age-pill">
-            ${
-              item.category === "lugyi"
-                ? "18+"
-                : item.category === "series"
-                  ? "Series"
-                  : "Movie"
-            }
-          </span>
-        </div>
+              <span>
+                ★ ${Number(item.rating || 0).toFixed(1)}
+              </span>
 
-        <div class="detail-meta-pills">
-          <span>${escapeHTML(item.year || "—")}</span>
+              ${
+                genres.length
+                  ? `
+                    <span>
+                      ${escapeHTML(genres.slice(0, 2).join(" · "))}
+                    </span>
+                  `
+                  : ""
+              }
+            </div>
 
-          ${
-            genres.length
-              ? genres.slice(0, 3).map(genre => `
-                <span>${escapeHTML(genre)}</span>
-              `).join("")
-              : ""
-          }
-        </div>
+            <div class="detail-actions">
+              ${
+                item.video_url
+                  ? `
+                    <button
+                      class="button"
+                      data-play-url="${escapeHTML(item.video_url)}"
+                      data-play-type="${escapeHTML(
+                        item.video_type || "auto"
+                      )}"
+                      data-play-name="${escapeHTML(item.title)}"
+                    >
+                      ${icons.play}
+                      Play
+                    </button>
+                  `
+                  : `
+                    <button
+                      class="button"
+                      type="button"
+                      disabled
+                    >
+                      အောက်တွင်အပိုင်းရွေးပါ
+                    </button>
+                  `
+              }
 
-        <div class="detail-overview single">
-          <h2>ဇာတ်လမ်းအကျဉ်း</h2>
+              ${
+                state.user
+                  ? `
+                    <button
+                      class="button secondary"
+                      data-favorite="${escapeHTML(item.id)}"
+                    >
+                      ${icons.heart}
+                      Favorite
+                    </button>
+                  `
+                  : ""
+              }
+            </div>
+          </div>
 
-          <p>${escapeHTML(
-            String(
-              item.overview ||
-              "ဇာတ်လမ်းအကျဉ်း မရှိသေးပါ။"
-            ).trim()
-          )}</p>
+          <div class="detail-overview">
+  <h2>ဇာတ်လမ်းအကျဉ်း</h2>
+  <p>${escapeHTML(
+    String(
+      item.overview ||
+      "ဇာတ်လမ်းအကျဉ်း မရှိသေးပါ။"
+    ).trim()
+  )}</p>
+</div>
+
         </div>
       </section>
 
       ${
-        episodes.length
+        genres.length
           ? `
-            <section class="episode-section detail-section">
+            <section class="detail-section">
               <div class="detail-section-heading">
-                <h2>Episodes</h2>
+                <h2>Genres</h2>
               </div>
 
-              <div
-                id="episodeBrowser"
-                class="episode-browser"
-              ></div>
+              <div class="detail-genres">
+                ${genres.map(genre => `
+                  <span class="genre-chip static">
+                    ${escapeHTML(genre)}
+                  </span>
+                `).join("")}
+              </div>
             </section>
           `
           : ""
       }
+
+      ${
+  episodes.length
+    ? `
+      <section class="episode-section detail-section">
+        <div class="detail-section-heading">
+          <h2>Episodes</h2>
+        </div>
+
+        <div
+          id="episodeBrowser"
+          class="episode-browser"
+        ></div>
+      </section>
+    `
+    : ""
+}
+
     `;
 
+    /*
+     * HTML ထဲမှာ #episodeBrowser ဖန်တီးပြီးမှ
+     * episode buttons တွေ render လုပ်ရပါမယ်။
+     */
     if (episodes.length) {
       setupEpisodeBrowser(episodes);
     }
 
-    document
-      .querySelector("[data-back]")
-      ?.addEventListener("click", () => {
-        if (history.length > 1) {
-          history.back();
-        } else {
-          location.hash = `#/${state.category || "movies"}`;
-        }
-      });
-
-    document
-      .querySelector("[data-share-title]")
-      ?.addEventListener("click", async () => {
-        const shareURL = location.href;
-
-        try {
-          if (navigator.share) {
-            await navigator.share({
-              title: item.title,
-              url: shareURL
-            });
-          } else {
-            await navigator.clipboard.writeText(shareURL);
-            toast("Link copy လုပ်ပြီးပါပြီ");
-          }
-        } catch {
-          /*
-           * User က share dialog ပိတ်လိုက်ရင် error မပြပါ။
-           */
-        }
-      });
-
-    document
-      .querySelector("[data-favorite-toggle]")
-      ?.addEventListener("click", async event => {
-        const button = event.currentTarget;
-        const titleId = button.dataset.favoriteToggle;
-        const isFavorited =
-          button.dataset.favorited === "1";
-
-        button.disabled = true;
-
-        try {
-          await api(
-            `favorites/${encodeURIComponent(titleId)}`,
-            {
-              method: isFavorited ? "DELETE" : "POST"
-            }
-          );
-
-          const nextValue = !isFavorited;
-
-          button.dataset.favorited = nextValue ? "1" : "0";
-          button.classList.toggle("active", nextValue);
-          button.title = nextValue
-            ? "Favorite မှ ဖျက်မည်"
-            : "Favorite မှတ်မည်";
-
-          toast(
-            nextValue
-              ? "Favorite မှတ်ပြီးပါပြီ"
-              : "Favorite မှ ဖျက်ပြီးပါပြီ"
-          );
-        } catch (error) {
-          toast(error.message);
-        } finally {
-          button.disabled = false;
-        }
-      });
-
+    /*
+     * API data ရပြီး detail cover/poster ကို DOM ထဲထည့်ပြီးနောက်
+     * layout ပြောင်းသွားနိုင်တာကြောင့် scroll ကို ထပ် reset လုပ်မယ်။
+     */
     resetPageScroll();
   } catch (error) {
     console.error("Detail page error:", error);
@@ -1137,108 +1050,34 @@ async function renderDetail(slug) {
 
 
 
-
-function favoriteMovieCard(item) {
-  return `
-    <div class="favorite-card">
-      ${movieCard(item)}
-
-      <button
-        type="button"
-        class="favorite-remove-button"
-        data-remove-favorite="${escapeHTML(item.id)}"
-        aria-label="Remove favorite"
-      >
-        ×
-      </button>
-    </div>
-  `;
-}
-
 async function renderFavorites() {
   if (!state.user) {
     openAuth();
     return;
   }
 
-  app.innerHTML = `
-    <section class="loading-card">
-      Loading favorites…
-    </section>
-  `;
+  app.innerHTML = `<section class="loading-card">Loading favorites…</section>`;
 
   try {
     const data = await api("favorites");
-    const items = data.items || [];
 
     app.innerHTML = `
       <div class="section-header">
         <h1>My Favorites</h1>
       </div>
 
-      <div id="favoriteGrid" class="movie-grid">
+      <div class="movie-grid">
         ${
-          items.length
-            ? items.map(favoriteMovieCard).join("")
-            : `
-              <section class="empty-card full">
-                Favorite မရှိသေးပါ
-              </section>
-            `
+          data.items.length
+            ? data.items.map(movieCard).join("")
+            : `<section class="empty-card full">Favorite မရှိသေးပါ</section>`
         }
       </div>
     `;
-
-    document
-      .querySelectorAll("[data-remove-favorite]")
-      .forEach(button => {
-        button.addEventListener("click", async event => {
-          event.preventDefault();
-          event.stopPropagation();
-
-          const titleId = button.dataset.removeFavorite;
-
-          button.disabled = true;
-
-          try {
-            await api(
-              `favorites/${encodeURIComponent(titleId)}`,
-              {
-                method: "DELETE"
-              }
-            );
-
-            button.closest(".favorite-card")?.remove();
-            toast("Favorite မှ ဖျက်ပြီးပါပြီ");
-
-            const grid =
-              document.querySelector("#favoriteGrid");
-
-            if (
-              grid &&
-              !grid.querySelector(".favorite-card")
-            ) {
-              grid.innerHTML = `
-                <section class="empty-card full">
-                  Favorite မရှိသေးပါ
-                </section>
-              `;
-            }
-          } catch (error) {
-            toast(error.message);
-            button.disabled = false;
-          }
-        });
-      });
   } catch (error) {
-    app.innerHTML = `
-      <section class="empty-card">
-        ${escapeHTML(error.message)}
-      </section>
-    `;
+    app.innerHTML = `<section class="empty-card">${escapeHTML(error.message)}</section>`;
   }
 }
-
 
 function openAuth(mode = "login") {
   if (state.user) {
