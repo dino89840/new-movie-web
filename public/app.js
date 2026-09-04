@@ -38,7 +38,14 @@ const state = {
   editing: null,
   parsedEpisodes: [],
   catalogObserver: null,
-  catalogRun: 0
+  catalogRun: 0,
+
+  /*
+   * Category တစ်ခုချင်းစီမှာ load လုပ်ထားတဲ့ movies,
+   * page number, search, genre နဲ့ scroll position ကို
+   * detail page ကနေ back ပြန်လာချိန် restore လုပ်ရန်။
+   */
+  catalogCache: Object.create(null)
 };
 
 const icons = {
@@ -211,10 +218,6 @@ function route() {
   const parts = hash.slice(2).split("/").filter(Boolean);
   const page = parts[0] || "movies";
 
-  /*
-   * URL hash ပြောင်းတိုင်း bottom navigation ရဲ့
-   * active item ကို ပြန်သတ်မှတ်မယ်။
-   */
   updateBottomNavigation(page);
 
   if (["movies", "series", "lugyi"].includes(page)) {
@@ -245,13 +248,27 @@ function route() {
   }
 
   if (page === "watch" && parts[1]) {
-    updateBottomNavigation("watch");
+    /*
+     * Detail page မဝင်ခင် လက်ရှိ catalog scroll position ကို
+     * သိမ်းထားမယ်။ Back ပြန်လာရင် နဂိုနေရာကို ပြန်ထားပေးနိုင်မယ်။
+     */
+    const currentCatalog =
+      state.catalogCache[state.category];
+
+    if (currentCatalog) {
+      currentCatalog.scrollY =
+        window.scrollY ||
+        document.documentElement.scrollTop ||
+        0;
+    }
 
     /*
-     * Movie/Series detail page ဝင်တာနဲ့
-     * အရင် page ရဲ့ scroll position ကို မယူဘဲ
-     * ချက်ချင်း ထိပ်ဆုံးပြမယ်။
+     * လက်ရှိ catalog request မပြီးသေးပါက
+     * detail page ကို ပြန်မဖုံးနိုင်အောင် cancel marker ပြောင်းမယ်။
      */
+    state.catalogRun++;
+
+    updateBottomNavigation("watch");
     resetPageScroll();
 
     renderDetail(
@@ -262,12 +279,20 @@ function route() {
   }
 
   if (page === "favorites") {
+    /*
+     * Pending catalog render ရှိလျှင် favorites page ကို
+     * နောက်မှ ပြန်မဖုံးနိုင်အောင် invalidate လုပ်မယ်။
+     */
+    state.catalogRun++;
+
     updateBottomNavigation("favorites");
     renderFavorites();
     return;
   }
 
   if (page === "admin") {
+    state.catalogRun++;
+
     updateBottomNavigation("");
     renderAdmin();
     return;
@@ -275,6 +300,7 @@ function route() {
 
   location.hash = "#/movies";
 }
+
 function splitGenres(value) {
   if (Array.isArray(value)) {
     return value
@@ -304,27 +330,38 @@ async function renderHome(category) {
   state.catalogObserver?.disconnect();
   state.catalogObserver = null;
 
-  app.innerHTML = `
-    <section class="loading-card">
-      Loading…
-    </section>
-  `;
+  /*
+   * ဒီ category ကို အရင်ဖွင့်ခဲ့ဖူးရင် cache ထဲက
+   * movies/page/search/genre/scroll ကို ပြန်ယူမယ်။
+   */
+  const savedCatalog =
+    state.catalogCache[category] || null;
 
-  document
-    .querySelectorAll("[data-category]")
-    .forEach(button => {
-      button.classList.toggle(
-        "active",
-        button.dataset.category === category
-      );
-    });
+  let currentItems = Array.isArray(
+    savedCatalog?.items
+  )
+    ? [...savedCatalog.items]
+    : [];
 
-  let currentItems = [];
-  let currentPage = 0;
-  let hasMore = true;
+  let currentPage =
+    Number(savedCatalog?.currentPage) || 0;
+
+  let hasMore =
+    savedCatalog
+      ? Boolean(savedCatalog.hasMore)
+      : true;
+
   let loading = false;
-  let activeGenre = "all";
-  let currentQuery = "";
+
+  let activeGenre =
+    savedCatalog?.activeGenre || "all";
+
+  let currentQuery =
+    savedCatalog?.currentQuery || "";
+
+  let savedScrollY =
+    Number(savedCatalog?.scrollY) || 0;
+
   let queryVersion = 0;
 
   const makeURL = page => {
@@ -335,15 +372,72 @@ async function renderHome(category) {
     );
   };
 
-  const firstData = await api(makeURL(1));
+  /*
+   * လက်ရှိ catalog state ကို memory ထဲသိမ်းမယ်။
+   */
+  const saveCatalogState = (
+    scrollY = window.scrollY || 0
+  ) => {
+    state.catalogCache[category] = {
+      items: [...currentItems],
+      currentPage,
+      hasMore,
+      activeGenre,
+      currentQuery,
+      scrollY
+    };
+  };
+
+  /*
+   * Cache မရှိမှသာ ပထမ page ကို API ကနေခေါ်မယ်။
+   * Detail ကနေ back ပြန်လာခြင်းဆိုရင် cache ကို သုံးမယ်။
+   */
+  if (!savedCatalog) {
+    app.innerHTML = `
+      <section class="loading-card">
+        Loading…
+      </section>
+    `;
+
+    try {
+      const firstData = await api(makeURL(1));
+
+      if (runId !== state.catalogRun) {
+        return;
+      }
+
+      currentItems = firstData.items || [];
+      currentPage = 1;
+      hasMore = Boolean(firstData.hasMore);
+
+      saveCatalogState(0);
+    } catch (error) {
+      if (runId !== state.catalogRun) {
+        return;
+      }
+
+      app.innerHTML = `
+        <section class="empty-card">
+          ${escapeHTML(error.message)}
+        </section>
+      `;
+
+      return;
+    }
+  }
 
   if (runId !== state.catalogRun) {
     return;
   }
 
-  currentItems = firstData.items || [];
-  currentPage = 1;
-  hasMore = Boolean(firstData.hasMore);
+  document
+    .querySelectorAll("[data-category]")
+    .forEach(button => {
+      button.classList.toggle(
+        "active",
+        button.dataset.category === category
+      );
+    });
 
   const genres = [
     ...new Set(
@@ -353,8 +447,22 @@ async function renderHome(category) {
     )
   ].sort((a, b) => a.localeCompare(b));
 
-  app.innerHTML = `
+  /*
+   * Cache ထဲက activeGenre ဟာ လက်ရှိ genre list ထဲ
+   * မရှိတော့ရင် All ကို ပြန်သတ်မှတ်မယ်။
+   */
+  if (
+    activeGenre !== "all" &&
+    !genres.some(
+      genre =>
+        genre.toLowerCase() ===
+        activeGenre.toLowerCase()
+    )
+  ) {
+    activeGenre = "all";
+  }
 
+  app.innerHTML = `
     <section class="catalog-section">
       <div class="section-header">
         <h2>
@@ -366,6 +474,7 @@ async function renderHome(category) {
           class="search-input"
           placeholder="ဇာတ်ကားရှာရန်…"
           autocomplete="off"
+          value="${escapeHTML(currentQuery)}"
         >
       </div>
 
@@ -379,7 +488,11 @@ async function renderHome(category) {
             >
               <button
                 type="button"
-                class="genre-chip active"
+                class="genre-chip ${
+                  activeGenre === "all"
+                    ? "active"
+                    : ""
+                }"
                 data-genre="all"
               >
                 All
@@ -388,7 +501,12 @@ async function renderHome(category) {
               ${genres.map(genre => `
                 <button
                   type="button"
-                  class="genre-chip"
+                  class="genre-chip ${
+                    genre.toLowerCase() ===
+                    activeGenre.toLowerCase()
+                      ? "active"
+                      : ""
+                  }"
                   data-genre="${escapeHTML(genre)}"
                 >
                   ${escapeHTML(genre)}
@@ -399,7 +517,10 @@ async function renderHome(category) {
           : ""
       }
 
-      <div id="movieGrid" class="movie-grid"></div>
+      <div
+        id="movieGrid"
+        class="movie-grid"
+      ></div>
 
       <div class="catalog-loader">
         <button
@@ -427,6 +548,9 @@ async function renderHome(category) {
 
   const catalogStatus =
     document.querySelector("#catalogStatus");
+
+  const searchInput =
+    document.querySelector("#movieSearch");
 
   const filteredItems = () => {
     if (activeGenre === "all") {
@@ -466,6 +590,7 @@ async function renderHome(category) {
 
     loading = true;
     loadMoreButton.disabled = true;
+
     catalogStatus.textContent =
       "နောက်ထပ်ဇာတ်ကားများ ရယူနေသည်…";
 
@@ -484,11 +609,20 @@ async function renderHome(category) {
       );
 
       const newItems = (data.items || [])
-        .filter(item => !existingIDs.has(item.id));
+        .filter(
+          item => !existingIDs.has(item.id)
+        );
 
       currentItems.push(...newItems);
       currentPage = nextPage;
       hasMore = Boolean(data.hasMore);
+      loading = false;
+
+      /*
+       * Load More လုပ်ထားတဲ့ items နဲ့ page number ကို
+       * သိမ်းထားမယ်။
+       */
+      saveCatalogState();
 
       paintGrid();
     } catch (error) {
@@ -496,7 +630,8 @@ async function renderHome(category) {
         runId === state.catalogRun &&
         version === queryVersion
       ) {
-        catalogStatus.textContent = error.message;
+        catalogStatus.textContent =
+          error.message;
       }
     } finally {
       if (
@@ -523,6 +658,16 @@ async function renderHome(category) {
     currentItems = [];
     hasMore = true;
     loading = true;
+    activeGenre = "all";
+
+    document
+      .querySelectorAll("[data-genre]")
+      .forEach(button => {
+        button.classList.toggle(
+          "active",
+          button.dataset.genre === "all"
+        );
+      });
 
     movieGrid.innerHTML = `
       <section class="loading-card full">
@@ -530,6 +675,7 @@ async function renderHome(category) {
       </section>
     `;
 
+    loadMoreButton.hidden = false;
     loadMoreButton.disabled = true;
     catalogStatus.textContent = "";
 
@@ -546,7 +692,9 @@ async function renderHome(category) {
       currentItems = data.items || [];
       currentPage = 1;
       hasMore = Boolean(data.hasMore);
+      loading = false;
 
+      saveCatalogState();
       paintGrid();
     } catch (error) {
       if (
@@ -558,6 +706,9 @@ async function renderHome(category) {
             ${escapeHTML(error.message)}
           </section>
         `;
+
+        catalogStatus.textContent =
+          error.message;
       }
     } finally {
       if (
@@ -580,7 +731,8 @@ async function renderHome(category) {
         return;
       }
 
-      activeGenre = button.dataset.genre;
+      activeGenre =
+        button.dataset.genre || "all";
 
       document
         .querySelectorAll("[data-genre]")
@@ -591,17 +743,18 @@ async function renderHome(category) {
           );
         });
 
+      saveCatalogState();
       paintGrid();
     });
 
-  document
-    .querySelector("#movieSearch")
-    ?.addEventListener(
-      "input",
-      debounce(event => {
-        resetSearch(event.target.value.trim());
-      }, 450)
-    );
+  searchInput?.addEventListener(
+    "input",
+    debounce(event => {
+      resetSearch(
+        event.target.value.trim()
+      );
+    }, 450)
+  );
 
   loadMoreButton.addEventListener(
     "click",
@@ -609,11 +762,50 @@ async function renderHome(category) {
   );
 
   /*
-   * Cloudflare Free plan request လျှော့ရန်
-   * automatic infinite loading မသုံးတော့ပါ။
-   * User က Load More နှိပ်မှ API request အသစ်လုပ်မယ်။
+   * User scroll လုပ်နေစဉ် position ကို အမြဲသိမ်းထားမယ်။
+   * Listener အဟောင်းက renderHome scope နဲ့အတူ မသုံးတော့ပေမယ့်
+   * current page ဟုတ်/မဟုတ် စစ်ထားပါတယ်။
    */
+  const rememberScroll = () => {
+    const currentPageName =
+      (location.hash || "#/movies")
+        .slice(2)
+        .split("/")[0];
+
+    if (
+      currentPageName === category &&
+      state.catalogCache[category]
+    ) {
+      state.catalogCache[category].scrollY =
+        window.scrollY || 0;
+    }
+  };
+
+  window.addEventListener(
+    "scroll",
+    rememberScroll,
+    {
+      passive: true,
+      once: true
+    }
+  );
+
   paintGrid();
+  saveCatalogState(savedScrollY);
+
+  /*
+   * Cache ကနေ ပြန်လာတာဖြစ်ရင်
+   * အရင်ကြည့်ခဲ့တဲ့ scroll position ကို restore လုပ်မယ်။
+   */
+  if (savedCatalog && savedScrollY > 0) {
+    requestAnimationFrame(() => {
+      window.scrollTo(0, savedScrollY);
+
+      requestAnimationFrame(() => {
+        window.scrollTo(0, savedScrollY);
+      });
+    });
+  }
 }
 
 function movieCard(item) {
