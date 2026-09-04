@@ -630,16 +630,28 @@ svg {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 24px;
+
+  /*
+   * Bottom navigation အပေါ်မှာ ပြမယ်။
+   */
+  bottom: calc(82px + env(safe-area-inset-bottom));
+
   z-index: 100;
   transform: translate(-50%, 120px);
   opacity: 0;
+
   background: #f7f7fb;
   color: #080a0f;
   border-radius: 999px;
   padding: 11px 18px;
   transition: .25s;
   max-width: 90%;
+
+  /*
+   * Toast က Movies/Series/Lugyi/Favorites
+   * button click တွေကို မပိတ်အောင်။
+   */
+  pointer-events: none;
 }
 
 .toast.show {
