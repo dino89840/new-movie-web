@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="my">
+<head>
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  >
+  <title>CMFLIX VIP Admin</title>
+
+  <style>
+    body {
+      margin: 0;
+      background: #080a0f;
+      color: white;
+      font-family: sans-serif;
+    }
+
+    main {
+      width: min(900px, calc(100% - 32px));
+      margin: 30px auto;
+    }
+
+    .card {
+      padding: 20px;
+      margin-bottom: 16px;
+      border: 1px solid #303540;
+      border-radius: 16px;
+      background: #171a22;
+    }
+
+    input, button {
+      box-sizing: border-box;
+      min-height: 44px;
+      padding: 10px 14px;
+      margin: 5px;
+      border-radius: 10px;
+      border: 1px solid #3a404c;
+      background: #222630;
+      color: white;
+    }
+
+    input {
+      width: min(100%, 340px);
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .primary {
+      background: #e50914;
+      border-color: #e50914;
+    }
+
+    .danger {
+      background: #8b1118;
+    }
+
+    .muted {
+      color: #a8adb8;
+    }
+
+    .user {
+      padding: 16px 0;
+      border-bottom: 1px solid #303540;
+    }
+
+    .user:last-child {
+      border-bottom: 0;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .days {
+      width: 90px;
+    }
+
+    #message {
+      white-space: pre-wrap;
+      color: #ffb4ab;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>CMFLIX VIP Admin</h1>
+
+    <section
+      id="loginCard"
+      class="card"
+      hidden
+    >
+      <h2>Admin Login</h2>
+
+      <input
+        id="identity"
+        placeholder="Admin username or email"
+      >
+
+      <input
+        id="password"
+        type="password"
+        placeholder="Password"
+      >
+
+      <button
+        id="loginButton"
+        class="primary"
+      >
+        Login
+      </button>
+    </section>
+
+    <section
+      id="adminCard"
+      class="card"
+      hidden
+    >
+      <div>
+        <input
+          id="search"
+          placeholder="Username သို့မဟုတ် email"
+        >
+
+        <button
+          id="searchButton"
+          class="primary"
+        >
+          Search
+        </button>
+      </div>
+
+      <div id="results"></div>
+    </section>
+
+    <section
+      id="message"
+      class="card"
+      hidden
+    ></section>
+  </main>
+
+  <script
+    type="module"
+    src="/vip-admin.js?v=1"
+  ></script>
+</body>
+</html>
