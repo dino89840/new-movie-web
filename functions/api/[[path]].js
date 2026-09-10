@@ -1071,123 +1071,265 @@ async function fetchTMDBDetails(env, tmdbType, tmdbId) {
     return null;
   }
 }
-async function publicTitles(request, env, context) {
-  const url = new URL(request.url);
-  const category = url.searchParams.get("category") || "movies";
-  const search = String(url.searchParams.get("q") || "")
+function buildFTSSearchQuery(value) {
+  const normalized = String(value || "")
+    .normalize("NFKC")
     .trim()
     .slice(0, 50);
 
-  const page = Math.max(
-    1,
-    Number(url.searchParams.get("page") || 1)
+  const tokens =
+    normalized.match(
+      /[\p{L}\p{M}\p{N}]+/gu
+    ) || [];
+
+  return tokens
+    .filter(token => [...token].length >= 2)
+    .slice(0, 8)
+    .map(token => `"${token}"*`)
+    .join(" AND ");
+}
+
+async function publicTitles(
+  request,
+  env,
+  context
+) {
+  const url = new URL(request.url);
+
+  const category =
+    url.searchParams.get("category") ||
+    "movies";
+
+  const search = String(
+    url.searchParams.get("q") || ""
+  )
+    .normalize("NFKC")
+    .trim()
+    .slice(0, 50);
+
+  const requestedPage = Number(
+    url.searchParams.get("page") || 1
   );
 
+  const page =
+    Number.isFinite(requestedPage)
+      ? Math.max(
+          1,
+          Math.min(
+            Math.floor(requestedPage),
+            1000
+          )
+        )
+      : 1;
+
   const limit = 15;
-const offset = (page - 1) * limit;
+  const offset = (page - 1) * limit;
 
+  if (
+    ![
+      "movies",
+      "series",
+      "lugyi"
+    ].includes(category)
+  ) {
+    return json(
+      {
+        error: "Category မှားနေပါသည်"
+      },
+      400
+    );
+  }
 
-  if (!["movies", "series", "lugyi"].includes(category)) {
-    return json({ error: "Category မှားနေပါသည်" }, 400);
+  const ftsSearch =
+    buildFTSSearchQuery(search);
+
+  /*
+   * 1-character search ကို FTS prefix search
+   * မလုပ်ပါ။ Query အလွန်ကျယ်သွားတာကို
+   * တားပေးပါတယ်။
+   */
+  if (search && !ftsSearch) {
+    return json(
+      {
+        items: [],
+        page,
+        hasMore: false
+      },
+      200,
+      {
+        "cache-control":
+          "public, max-age=60, s-maxage=60"
+      }
+    );
   }
 
   const cache = caches.default;
-  const cacheURL = new URL(url.toString());
 
-  // အဟောင်း cache နဲ့မရောစေရန်
-  cacheURL.searchParams.set("_dataVersion", "5");
+  const cacheURL =
+    new URL(url.toString());
 
-  const cacheKey = new Request(cacheURL.toString(), {
-    method: "GET"
-  });
+  /*
+   * Search/data format ပြောင်းထားတာကြောင့်
+   * အဟောင်း cache မသုံးပါ။
+   */
+  cacheURL.searchParams.set(
+    "_dataVersion",
+    "6"
+  );
 
-  const cached = await cache.match(cacheKey);
+  const cacheKey =
+    new Request(
+      cacheURL.toString(),
+      {
+        method: "GET"
+      }
+    );
+
+  const cached =
+    await cache.match(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  let query = `
-    SELECT
-      id, slug, tmdb_id, tmdb_type, category, title,
-      original_title, overview, poster_url, backdrop_url,
-      release_date, year, rating, genres, featured,
-      created_at, updated_at
-    FROM titles
-    WHERE status='public' AND category=?
-  `;
+  let query;
+  let params;
 
-  const params = [category];
+  if (ftsSearch) {
+    query = `
+      SELECT
+        t.id,
+        t.slug,
+        t.tmdb_id,
+        t.tmdb_type,
+        t.category,
+        t.title,
+        t.original_title,
+        t.overview,
+        t.poster_url,
+        t.backdrop_url,
+        t.release_date,
+        t.year,
+        t.rating,
+        t.genres,
+        t.featured,
+        t.created_at,
+        t.updated_at
+      FROM titles AS t
+      JOIN titles_fts
+        ON titles_fts.rowid = t.rowid
+      WHERE t.status = 'public'
+        AND t.category = ?
+        AND titles_fts MATCH ?
+      ORDER BY
+        t.featured DESC,
+        t.updated_at DESC,
+        t.created_at DESC
+      LIMIT ?
+      OFFSET ?
+    `;
 
-  if (search) {
-    query += " AND (title LIKE ? OR original_title LIKE ?)";
-    params.push(`%${search}%`, `%${search}%`);
+    params = [
+      category,
+      ftsSearch,
+      limit,
+      offset
+    ];
+  } else {
+    query = `
+      SELECT
+        id,
+        slug,
+        tmdb_id,
+        tmdb_type,
+        category,
+        title,
+        original_title,
+        overview,
+        poster_url,
+        backdrop_url,
+        release_date,
+        year,
+        rating,
+        genres,
+        featured,
+        created_at,
+        updated_at
+      FROM titles
+      WHERE status = 'public'
+        AND category = ?
+      ORDER BY
+        featured DESC,
+        updated_at DESC,
+        created_at DESC
+      LIMIT ?
+      OFFSET ?
+    `;
+
+    params = [
+      category,
+      limit,
+      offset
+    ];
   }
 
-  query += `
-    ORDER BY featured DESC, updated_at DESC, created_at DESC
-    LIMIT ? OFFSET ?
-  `;
+  const result =
+    await env.DB
+      .prepare(query)
+      .bind(...params)
+      .all();
 
-  params.push(limit, offset);
+  const databaseItems =
+    result.results || [];
 
-  const result = await env.DB
-    .prepare(query)
-    .bind(...params)
-    .all();
+  const items =
+    databaseItems.map(item => ({
+      ...item,
 
-  const databaseItems = result.results || [];
+      genres:
+        String(
+          item.genres || ""
+        ).trim(),
 
-  /*
-   * Database ထဲ genres မရှိသေးတဲ့ အဟောင်းကားတွေကို
-   * TMDB ကနေ genre ပြန်ယူပေးပါတယ်။
-   */
-  const items = databaseItems.map(item => ({
-  ...item,
+      poster_url:
+        proxiedTMDBImageURL(
+          item.poster_url,
+          "w342"
+        ),
 
-  /*
-   * List request တိုင်း TMDB ကို ထပ်မခေါ်ပါ။
-   * Genres ကို admin import/save လုပ်ချိန်ကတည်းက
-   * database ထဲသိမ်းထားရပါမယ်။
-   */
-  genres: String(item.genres || "").trim(),
-
-  poster_url: proxiedTMDBImageURL(
-    item.poster_url,
-    "w342"
-  ),
-
-  backdrop_url: proxiedTMDBImageURL(
-    item.backdrop_url,
-    "w780"
-  )
-}));
-
+      backdrop_url:
+        proxiedTMDBImageURL(
+          item.backdrop_url,
+          "w780"
+        )
+    }));
 
   const response = json(
     {
       items,
       page,
-      hasMore: databaseItems.length === limit
+      hasMore:
+        databaseItems.length === limit
     },
     200,
     {
-      /*
-       * Browser တွင် 5 minutes သိမ်းထားမယ်။
-       * တူညီတဲ့ category/search/page ကို ပြန်ဖွင့်ရင်
-       * Worker request ထပ်မပို့နိုင်အောင် လျှော့ပေးတယ်။
-       */
       "cache-control":
-        "public, max-age=300, s-maxage=300, stale-while-revalidate=600"
+        "public, max-age=300, " +
+        "s-maxage=300, " +
+        "stale-while-revalidate=600"
     }
   );
 
   context.waitUntil(
-    cache.put(cacheKey, response.clone())
+    cache.put(
+      cacheKey,
+      response.clone()
+    )
   );
 
   return response;
 }
+
 
 
 async function publicTitle(
