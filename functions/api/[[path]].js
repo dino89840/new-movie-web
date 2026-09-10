@@ -41,6 +41,14 @@ export async function onRequest(context) {
       return me(request, env);
     }
 
+    if (path === "account/password" && method === "POST") {
+      return changePassword(request, env);
+    }
+
+    if (path === "play" && method === "POST") {
+      return protectedPlayback(request, env);
+    }
+
     const maintenance = await getSetting(env, "maintenance_mode", "0");
     const isAdminRoute = path.startsWith("admin/");
 
@@ -89,6 +97,30 @@ export async function onRequest(context) {
         env,
         decodeURIComponent(path.slice("favorites/".length))
       );
+    }
+
+    if (path === "admin/vip-users" && method === "GET") {
+      return adminSearchVipUsers(request, env);
+    }
+
+    const vipUserMatch =
+      path.match(/^admin\/vip-users\/([^/]+)\/(extend|reset-device|cancel)$/);
+
+    if (vipUserMatch && method === "POST") {
+      const userId = decodeURIComponent(vipUserMatch[1]);
+      const action = vipUserMatch[2];
+
+      if (action === "extend") {
+        return adminExtendVip(request, env, userId);
+      }
+
+      if (action === "reset-device") {
+        return adminResetVipDevice(request, env, userId);
+      }
+
+      if (action === "cancel") {
+        return adminCancelVip(request, env, userId);
+      }
     }
 
     if (path === "admin/tmdb/search" && method === "GET") {
@@ -153,6 +185,27 @@ function json(data, status = 200, extraHeaders = {}) {
       ...extraHeaders
     }
   });
+}
+function normalizeDeviceId(value) {
+  const deviceId = String(value || "").trim();
+
+  if (!/^[a-zA-Z0-9._:-]{16,128}$/.test(deviceId)) {
+    return "";
+  }
+
+  return deviceId;
+}
+
+function deviceIdFromRequest(request, body = null) {
+  return normalizeDeviceId(
+    body?.deviceId ||
+    request.headers.get("x-cmflix-device-id") ||
+    ""
+  );
+}
+
+function vipActive(user, now = Date.now()) {
+  return Number(user?.vip_until || 0) > now;
 }
 
 async function readBody(request) {
@@ -346,21 +399,49 @@ async function verifyTurnstile(request, env, token) {
 
 /* -------------------- Authentication -------------------- */
 
-async function createSession(env, userId) {
+async function createSession(
+  env,
+  userId,
+  deviceId = ""
+) {
   const token = randomToken(32);
   const tokenHash = await sha256(token);
   const csrf = randomToken(24);
   const now = Date.now();
-  const days = Math.max(1, Number(env.SESSION_DAYS || 30));
-  const expiresAt = now + days * 86400000;
+  const days = Math.max(
+    1,
+    Number(env.SESSION_DAYS || 30)
+  );
+  const expiresAt =
+    now + days * 86400000;
 
   await env.DB.prepare(
     `INSERT INTO sessions
-     (token_hash, user_id, csrf_token, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?)`
-  ).bind(tokenHash, userId, csrf, expiresAt, now).run();
+     (
+       token_hash,
+       user_id,
+       csrf_token,
+       device_id,
+       expires_at,
+       created_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(
+    tokenHash,
+    userId,
+    csrf,
+    deviceId,
+    expiresAt,
+    now
+  ).run();
 
-  return { token, csrf, expiresAt };
+  return {
+    token,
+    tokenHash,
+    csrf,
+    deviceId,
+    expiresAt
+  };
 }
 
 function sessionCookie(token, expiresAt) {
@@ -386,52 +467,76 @@ function clearSessionCookie() {
 }
 
 async function getAuth(request, env) {
-  const token = parseCookies(request)[SESSION_COOKIE];
+  const token =
+    parseCookies(request)[SESSION_COOKIE];
 
-  if (!token) return null;
+  if (!token) {
+    return null;
+  }
 
-  // ~2% ဖြစ်နိုင်ခြေဖြင့် expired session အဟောင်းများ ရှင်းလင်းမယ် (request မပိုစေရန်)
   if (Math.random() < 0.02) {
     try {
       await env.DB.prepare(
         "DELETE FROM sessions WHERE expires_at <= ?"
       ).bind(Date.now()).run();
     } catch (_) {
-      /* cleanup မအောင်မြင်လည်း login ကို မထိခိုက်စေပါ */
+      // Cleanup failure ကို ignore လုပ်မယ်။
     }
   }
 
   const tokenHash = await sha256(token);
+  const now = Date.now();
 
   const row = await env.DB.prepare(
     `SELECT
        s.token_hash,
        s.csrf_token,
+       s.device_id AS session_device_id,
        s.expires_at,
        u.id,
        u.username,
        u.email,
        u.role,
-       u.status
-     FROM sessions s
-     JOIN users u ON u.id = s.user_id
+       u.status,
+       u.vip_until,
+       u.vip_device_id
+     FROM sessions AS s
+     JOIN users AS u
+       ON u.id = s.user_id
      WHERE s.token_hash = ?
-       AND s.expires_at > ?`
-  ).bind(tokenHash, Date.now()).first();
+       AND s.expires_at > ?
+     LIMIT 1`
+  ).bind(
+    tokenHash,
+    now
+  ).first();
 
-  if (!row || row.status !== "active") return null;
+  if (!row || row.status !== "active") {
+    return null;
+  }
 
   return {
     tokenHash: row.token_hash,
     csrf: row.csrf_token,
+    sessionDeviceId:
+      row.session_device_id || "",
     user: {
       id: row.id,
       username: row.username,
       email: row.email,
-      role: row.role
+      role: row.role,
+      vipUntil:
+        Number(row.vip_until || 0),
+      isVip:
+        Number(row.vip_until || 0) > now,
+      vipDeviceBound:
+        Boolean(row.vip_device_id),
+      vipDeviceId:
+        row.vip_device_id || ""
     }
   };
 }
+
 
 async function requireAuth(request, env) {
   const auth = await getAuth(request, env);
@@ -563,13 +668,28 @@ async function createUser(body, env, role) {
     now
   ).run();
 
-  const session = await createSession(env, id);
+  const deviceId =
+    normalizeDeviceId(body.deviceId);
+
+  const session = await createSession(
+    env,
+    id,
+    deviceId
+  );
 
   return json(
     {
       ok: true,
       csrf: session.csrf,
-      user: { id, username, email, role }
+      user: {
+  id,
+  username,
+  email,
+  role,
+  vipUntil: 0,
+  isVip: false,
+  vipDeviceBound: false
+}
     },
     201,
     {
@@ -580,40 +700,163 @@ async function createUser(body, env, role) {
 
 async function login(request, env) {
   if (!rateLimit(request, "login", 10, 5 * 60000)) {
-    return json({ error: "Login အကြိမ်များလွန်းပါသည်" }, 429);
+    return json(
+      { error: "Login အကြိမ်များလွန်းပါသည်" },
+      429
+    );
   }
 
   const body = await readBody(request);
 
-  if (!(await verifyTurnstile(request, env, body.turnstileToken))) {
-    return json({ error: "Turnstile verification မအောင်မြင်ပါ" }, 400);
+  if (
+    !(await verifyTurnstile(
+      request,
+      env,
+      body.turnstileToken
+    ))
+  ) {
+    return json(
+      {
+        error:
+          "Turnstile verification မအောင်မြင်ပါ"
+      },
+      400
+    );
   }
 
-  const identity = String(body.identity || "").trim();
-  const password = String(body.password || "");
+  const identity =
+    String(body.identity || "").trim();
+
+  const password =
+    String(body.password || "");
+
+  const deviceId =
+    deviceIdFromRequest(request, body);
 
   const user = await env.DB.prepare(
-    `SELECT * FROM users
+    `SELECT *
+     FROM users
      WHERE username = ? COLLATE NOCASE
         OR email = ? COLLATE NOCASE
      LIMIT 1`
-  ).bind(identity, normalizeEmail(identity)).first();
+  ).bind(
+    identity,
+    normalizeEmail(identity)
+  ).first();
 
   if (!user || user.status !== "active") {
-    return json({ error: "Login information မှားနေပါသည်" }, 401);
+    return json(
+      {
+        error:
+          "Login information မှားနေပါသည်"
+      },
+      401
+    );
   }
 
-  const passwordData = await hashPassword(
-    password,
-    user.password_salt,
-    user.password_iterations
+  const passwordData =
+    await hashPassword(
+      password,
+      user.password_salt,
+      user.password_iterations
+    );
+
+  if (
+    !safeEqual(
+      passwordData.hash,
+      user.password_hash
+    )
+  ) {
+    return json(
+      {
+        error:
+          "Login information မှားနေပါသည်"
+      },
+      401
+    );
+  }
+
+  const now = Date.now();
+  const isVip =
+    Number(user.vip_until || 0) > now;
+
+  /*
+   * Admin account ကို device lock မလုပ်ပါ။
+   * VIP user ကိုသာ တစ်စက်တည်းသုံးခွင့်ပေးမယ်။
+   */
+  if (isVip && user.role !== "admin") {
+    if (!deviceId) {
+      return json(
+        {
+          error: "device_id_required",
+          message:
+            "Device ID မရပါ။ App ကို update လုပ်ပြီး ပြန်ဝင်ပါ။"
+        },
+        400
+      );
+    }
+
+    if (
+      user.vip_device_id &&
+      user.vip_device_id !== deviceId
+    ) {
+      return json(
+        {
+          error: "vip_device_limit",
+          message:
+            "ဤ VIP account ကို တခြားဖုန်းတွင် အသုံးပြုနေပါသည်။ အရင်ဖုန်းမှ logout ထွက်ပါ သို့မဟုတ် admin ကို device reset တောင်းပါ။"
+        },
+        409
+      );
+    }
+
+    if (!user.vip_device_id) {
+      await env.DB.prepare(
+        `UPDATE users
+         SET vip_device_id = ?,
+             updated_at = ?
+         WHERE id = ?
+           AND vip_device_id IS NULL`
+      ).bind(
+        deviceId,
+        now,
+        user.id
+      ).run();
+
+      const updated =
+        await env.DB.prepare(
+          `SELECT vip_device_id
+           FROM users
+           WHERE id = ?`
+        ).bind(user.id).first();
+
+      if (
+        updated?.vip_device_id !== deviceId
+      ) {
+        return json(
+          {
+            error: "vip_device_limit",
+            message:
+              "VIP account ကို တခြားစက်က အသုံးပြုနေပါသည်။"
+          },
+          409
+        );
+      }
+    }
+
+    /*
+     * VIP account မှာ active session တစ်ခုတည်းထားမယ်။
+     */
+    await env.DB.prepare(
+      "DELETE FROM sessions WHERE user_id = ?"
+    ).bind(user.id).run();
+  }
+
+  const session = await createSession(
+    env,
+    user.id,
+    deviceId
   );
-
-  if (!safeEqual(passwordData.hash, user.password_hash)) {
-    return json({ error: "Login information မှားနေပါသည်" }, 401);
-  }
-
-  const session = await createSession(env, user.id);
 
   return json(
     {
@@ -623,37 +866,85 @@ async function login(request, env) {
         id: user.id,
         username: user.username,
         email: user.email,
-        role: user.role
+        role: user.role,
+        vipUntil:
+          Number(user.vip_until || 0),
+        isVip,
+        vipDeviceBound:
+          Boolean(
+            isVip &&
+            (
+              user.vip_device_id ||
+              deviceId
+            )
+          )
       }
     },
     200,
     {
-      "set-cookie": sessionCookie(session.token, session.expiresAt)
+      "set-cookie":
+        sessionCookie(
+          session.token,
+          session.expiresAt
+        )
     }
   );
 }
+
 
 async function logout(request, env) {
   const auth = await getAuth(request, env);
 
   if (auth) {
-    const csrf = request.headers.get("x-csrf-token") || "";
+    const csrf =
+      request.headers.get("x-csrf-token") || "";
 
     if (!safeEqual(csrf, auth.csrf)) {
-      return json({ error: "CSRF token မှားနေပါသည်" }, 403);
+      return json(
+        { error: "CSRF token မှားနေပါသည်" },
+        403
+      );
     }
 
-    await env.DB.prepare(
-      "DELETE FROM sessions WHERE token_hash = ?"
-    ).bind(auth.tokenHash).run();
+    const statements = [
+      env.DB.prepare(
+        `DELETE FROM sessions
+         WHERE token_hash = ?`
+      ).bind(auth.tokenHash)
+    ];
+
+    if (
+      auth.sessionDeviceId &&
+      auth.user.vipDeviceId ===
+        auth.sessionDeviceId
+    ) {
+      statements.push(
+        env.DB.prepare(
+          `UPDATE users
+           SET vip_device_id = NULL,
+               updated_at = ?
+           WHERE id = ?
+             AND vip_device_id = ?`
+        ).bind(
+          Date.now(),
+          auth.user.id,
+          auth.sessionDeviceId
+        )
+      );
+    }
+
+    await env.DB.batch(statements);
   }
 
   return json(
     { ok: true },
     200,
-    { "set-cookie": clearSessionCookie() }
+    {
+      "set-cookie": clearSessionCookie()
+    }
   );
 }
+
 
 async function me(request, env) {
   const auth = await getAuth(request, env);
@@ -1347,7 +1638,7 @@ async function publicTitle(
    */
   cacheURL.searchParams.set(
     "_dataVersion",
-    "5"
+    "7"
   );
 
   const cacheKey = new Request(
@@ -1399,6 +1690,27 @@ async function publicTitle(
       .bind(title.id)
       .all();
 
+  const isVipTitle =
+    title.category === "lugyi";
+
+  const episodes =
+    (episodesResult.results || []).map(
+      episode => ({
+        ...episode,
+        has_video:
+          Boolean(episode.video_url),
+
+        /*
+         * 18+ episode URL ကို public response
+         * ထဲမထည့်ပါ။
+         */
+        video_url:
+          isVipTitle
+            ? ""
+            : episode.video_url
+      })
+    );
+
   const item = {
     ...title,
 
@@ -1415,8 +1727,21 @@ async function publicTitle(
       "w1280"
     ),
 
-    episodes:
-      episodesResult.results || []
+    has_video:
+      Boolean(title.video_url),
+
+    /*
+     * Movies/Series link ပုံမှန်ပြန်ပေးမယ်။
+     * 18+ link ကို /api/play ကသာပြန်ပေးမယ်။
+     */
+    video_url:
+      isVipTitle
+        ? ""
+        : title.video_url,
+
+    vip_required: isVipTitle,
+
+    episodes
   };
 
   const response = json(
@@ -2065,4 +2390,569 @@ async function adminUpdateSettings(request, env) {
   ]);
 
   return json({ ok: true });
+}
+async function changePassword(request, env) {
+  const result =
+    await requireAuth(request, env);
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const csrf =
+    request.headers.get("x-csrf-token") || "";
+
+  if (!safeEqual(csrf, result.auth.csrf)) {
+    return json(
+      { error: "CSRF token မှားနေပါသည်" },
+      403
+    );
+  }
+
+  if (
+    !rateLimit(
+      request,
+      "change-password",
+      5,
+      10 * 60000
+    )
+  ) {
+    return json(
+      {
+        error:
+          "Password ပြောင်းသည့်အကြိမ် များလွန်းပါသည်"
+      },
+      429
+    );
+  }
+
+  const body = await readBody(request);
+
+  const currentPassword =
+    String(body.currentPassword || "");
+
+  const newPassword =
+    String(body.newPassword || "");
+
+  if (
+    newPassword.length < 8 ||
+    newPassword.length > 128
+  ) {
+    return json(
+      {
+        error:
+          "Password အသစ်သည် 8–128 လုံးဖြစ်ရပါမည်"
+      },
+      400
+    );
+  }
+
+  const user = await env.DB.prepare(
+    `SELECT
+       password_hash,
+       password_salt,
+       password_iterations
+     FROM users
+     WHERE id = ?`
+  ).bind(
+    result.auth.user.id
+  ).first();
+
+  if (!user) {
+    return json(
+      { error: "User မတွေ့ပါ" },
+      404
+    );
+  }
+
+  const currentData =
+    await hashPassword(
+      currentPassword,
+      user.password_salt,
+      user.password_iterations
+    );
+
+  if (
+    !safeEqual(
+      currentData.hash,
+      user.password_hash
+    )
+  ) {
+    return json(
+      {
+        error:
+          "လက်ရှိ password မှားနေပါသည်"
+      },
+      400
+    );
+  }
+
+  const passwordData =
+    await hashPassword(newPassword);
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE users
+       SET password_hash = ?,
+           password_salt = ?,
+           password_iterations = ?,
+           updated_at = ?
+       WHERE id = ?`
+    ).bind(
+      passwordData.hash,
+      passwordData.salt,
+      passwordData.iterations,
+      Date.now(),
+      result.auth.user.id
+    ),
+
+    /*
+     * လက်ရှိဖုန်း session ကိုထားပြီး
+     * ကျန် session များကို logout လုပ်မယ်။
+     */
+    env.DB.prepare(
+      `DELETE FROM sessions
+       WHERE user_id = ?
+         AND token_hash <> ?`
+    ).bind(
+      result.auth.user.id,
+      result.auth.tokenHash
+    )
+  ]);
+
+  return json({
+    ok: true,
+    message:
+      "Password ပြောင်းပြီးပါပြီ"
+  });
+}
+async function protectedPlayback(
+  request,
+  env
+) {
+  const body = await readBody(request);
+
+  const titleId =
+    String(body.titleId || "").trim();
+
+  const episodeId =
+    String(body.episodeId || "").trim();
+
+  if (!titleId) {
+    return json(
+      { error: "Title ID လိုအပ်ပါသည်" },
+      400
+    );
+  }
+
+  const title = await env.DB.prepare(
+    `SELECT
+       id,
+       category,
+       status,
+       video_url,
+       video_type
+     FROM titles
+     WHERE id = ?
+       AND status = 'public'
+     LIMIT 1`
+  ).bind(titleId).first();
+
+  if (!title) {
+    return json(
+      { error: "ဇာတ်ကားမတွေ့ပါ" },
+      404
+    );
+  }
+
+  /*
+   * Movies/Series ဆို login/VIP မစစ်ပါ။
+   * APK က လက်ရှိ direct URL ကိုဆက်သုံးနိုင်ပါတယ်။
+   */
+  if (title.category !== "lugyi") {
+    return resolvePlaybackSource(
+      env,
+      title,
+      episodeId
+    );
+  }
+
+  const result =
+    await requireAuth(request, env);
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const auth = result.auth;
+  const now = Date.now();
+
+  if (
+    Number(auth.user.vipUntil || 0) <= now
+  ) {
+    return json(
+      {
+        error: "vip_required",
+        message:
+          "18+ ကြည့်ရန် VIP လိုအပ်ပါသည်။"
+      },
+      403
+    );
+  }
+
+  if (!auth.sessionDeviceId) {
+    return json(
+      {
+        error: "device_id_required",
+        message:
+          "Device ID မရပါ။ Logout ထွက်ပြီး ပြန်ဝင်ပါ။"
+      },
+      409
+    );
+  }
+
+  /*
+   * VIP ပေးချိန်မှာ user login ဝင်ပြီးသားဖြစ်နေရင်
+   * ပထမဆုံး play လုပ်သောဖုန်းကို bind လုပ်မယ်။
+   */
+  if (!auth.user.vipDeviceId) {
+    await env.DB.prepare(
+      `UPDATE users
+       SET vip_device_id = ?,
+           updated_at = ?
+       WHERE id = ?
+         AND vip_device_id IS NULL`
+    ).bind(
+      auth.sessionDeviceId,
+      now,
+      auth.user.id
+    ).run();
+
+    const updated =
+      await env.DB.prepare(
+        `SELECT vip_device_id
+         FROM users
+         WHERE id = ?`
+      ).bind(
+        auth.user.id
+      ).first();
+
+    if (
+      updated?.vip_device_id !==
+        auth.sessionDeviceId
+    ) {
+      return json(
+        {
+          error: "vip_device_limit",
+          message:
+            "VIP account ကို တခြားဖုန်းက အသုံးပြုနေပါသည်။"
+        },
+        409
+      );
+    }
+  } else if (
+    auth.user.vipDeviceId !==
+      auth.sessionDeviceId
+  ) {
+    return json(
+      {
+        error: "vip_device_limit",
+        message:
+          "VIP account ကို တခြားဖုန်းက အသုံးပြုနေပါသည်။ Logout သို့မဟုတ် admin device reset လိုအပ်ပါသည်။"
+      },
+      409
+    );
+  }
+
+  const playback =
+    await resolvePlaybackSource(
+      env,
+      title,
+      episodeId
+    );
+
+  playback.headers.set(
+    "cache-control",
+    "no-store"
+  );
+
+  return playback;
+}
+
+async function resolvePlaybackSource(
+  env,
+  title,
+  episodeId
+) {
+  if (episodeId) {
+    const episode =
+      await env.DB.prepare(
+        `SELECT video_url, video_type
+         FROM episodes
+         WHERE id = ?
+           AND title_id = ?
+         LIMIT 1`
+      ).bind(
+        episodeId,
+        title.id
+      ).first();
+
+    if (!episode?.video_url) {
+      return json(
+        { error: "Episode video မတွေ့ပါ" },
+        404,
+        { "cache-control": "no-store" }
+      );
+    }
+
+    return json(
+      {
+        ok: true,
+        videoUrl: episode.video_url,
+        videoType:
+          episode.video_type || "auto"
+      },
+      200,
+      { "cache-control": "no-store" }
+    );
+  }
+
+  if (!title.video_url) {
+    return json(
+      { error: "Video link မရှိပါ" },
+      404,
+      { "cache-control": "no-store" }
+    );
+  }
+
+  return json(
+    {
+      ok: true,
+      videoUrl: title.video_url,
+      videoType:
+        title.video_type || "auto"
+    },
+    200,
+    { "cache-control": "no-store" }
+  );
+}
+async function adminSearchVipUsers(
+  request,
+  env
+) {
+  const result =
+    await requireAdmin(request, env);
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const url = new URL(request.url);
+  const query =
+    String(url.searchParams.get("q") || "")
+      .trim()
+      .slice(0, 100);
+
+  if (query.length < 2) {
+    return json({
+      items: []
+    });
+  }
+
+  const prefix = `${query}%`;
+
+  const rows = await env.DB.prepare(
+    `SELECT
+       id,
+       username,
+       email,
+       status,
+       vip_until,
+       vip_device_id,
+       created_at
+     FROM users
+     WHERE role = 'user'
+       AND (
+         username LIKE ? COLLATE NOCASE
+         OR email LIKE ? COLLATE NOCASE
+       )
+     ORDER BY username ASC
+     LIMIT 30`
+  ).bind(
+    prefix,
+    prefix
+  ).all();
+
+  const now = Date.now();
+
+  return json({
+    items:
+      (rows.results || []).map(user => ({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        status: user.status,
+        vipUntil:
+          Number(user.vip_until || 0),
+        isVip:
+          Number(user.vip_until || 0) > now,
+        vipDeviceBound:
+          Boolean(user.vip_device_id)
+      }))
+  });
+}
+
+async function adminExtendVip(
+  request,
+  env,
+  userId
+) {
+  const result =
+    await requireAdmin(request, env, true);
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const body = await readBody(request);
+  const days = Math.floor(
+    Number(body.days || 0)
+  );
+
+  if (
+    !Number.isFinite(days) ||
+    days < 1 ||
+    days > 3650
+  ) {
+    return json(
+      {
+        error:
+          "VIP days သည် 1 မှ 3650 အတွင်းဖြစ်ရပါမည်"
+      },
+      400
+    );
+  }
+
+  const user = await env.DB.prepare(
+    `SELECT id, vip_until
+     FROM users
+     WHERE id = ?
+       AND role = 'user'
+     LIMIT 1`
+  ).bind(userId).first();
+
+  if (!user) {
+    return json(
+      { error: "User မတွေ့ပါ" },
+      404
+    );
+  }
+
+  const now = Date.now();
+  const oldVipUntil =
+    Number(user.vip_until || 0);
+
+  const base =
+    Math.max(now, oldVipUntil);
+
+  const vipUntil =
+    base + days * 86400000;
+
+  await env.DB.prepare(
+    `UPDATE users
+     SET vip_until = ?,
+         vip_device_id =
+           CASE
+             WHEN vip_until <= ?
+             THEN NULL
+             ELSE vip_device_id
+           END,
+         updated_at = ?
+     WHERE id = ?`
+  ).bind(
+    vipUntil,
+    now,
+    now,
+    userId
+  ).run();
+
+  return json({
+    ok: true,
+    vipUntil
+  });
+}
+
+async function adminResetVipDevice(
+  request,
+  env,
+  userId
+) {
+  const result =
+    await requireAdmin(request, env, true);
+
+  if (result.error) {
+    return result.error;
+  }
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE users
+       SET vip_device_id = NULL,
+           updated_at = ?
+       WHERE id = ?
+         AND role = 'user'`
+    ).bind(
+      Date.now(),
+      userId
+    ),
+
+    env.DB.prepare(
+      `DELETE FROM sessions
+       WHERE user_id = ?`
+    ).bind(userId)
+  ]);
+
+  return json({
+    ok: true,
+    message:
+      "Device reset ပြီးပါပြီ။ User ပြန် login ဝင်ရပါမည်။"
+  });
+}
+
+async function adminCancelVip(
+  request,
+  env,
+  userId
+) {
+  const result =
+    await requireAdmin(request, env, true);
+
+  if (result.error) {
+    return result.error;
+  }
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE users
+       SET vip_until = 0,
+           vip_device_id = NULL,
+           updated_at = ?
+       WHERE id = ?
+         AND role = 'user'`
+    ).bind(
+      Date.now(),
+      userId
+    ),
+
+    env.DB.prepare(
+      `DELETE FROM sessions
+       WHERE user_id = ?`
+    ).bind(userId)
+  ]);
+
+  return json({
+    ok: true,
+    message:
+      "VIP ပယ်ဖျက်ပြီးပါပြီ။"
+  });
 }
