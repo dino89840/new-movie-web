@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS users (
     CHECK(role IN ('user', 'admin')),
   status TEXT NOT NULL DEFAULT 'active'
     CHECK(status IN ('active', 'blocked')),
+  vip_until INTEGER NOT NULL DEFAULT 0,
+  vip_device_id TEXT DEFAULT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -25,6 +27,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   csrf_token TEXT NOT NULL,
+  device_id TEXT NOT NULL DEFAULT '',
   expires_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -123,3 +126,8 @@ ON titles(
   created_at DESC,
   id DESC
 );
+CREATE INDEX IF NOT EXISTS idx_users_vip_until
+ON users(vip_until);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user_device
+ON sessions(user_id, device_id);
