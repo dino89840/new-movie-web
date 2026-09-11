@@ -2925,34 +2925,78 @@ async function adminCancelVip(
   userId
 ) {
   const result =
-    await requireAdmin(request, env, true);
+    await requireAdmin(
+      request,
+      env,
+      true
+    );
 
   if (result.error) {
     return result.error;
   }
 
-  await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE users
-       SET vip_until = 0,
-           vip_device_id = NULL,
-           updated_at = ?
+  const user =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         username,
+         role
+       FROM users
        WHERE id = ?
-         AND role = 'user'`
-    ).bind(
-      Date.now(),
-      userId
-    ),
+       LIMIT 1`
+    )
+      .bind(userId)
+      .first();
 
-    env.DB.prepare(
-      `DELETE FROM sessions
-       WHERE user_id = ?`
-    ).bind(userId)
-  ]);
+  if (!user) {
+    return json(
+      {
+        error: "User မတွေ့ပါ"
+      },
+      404
+    );
+  }
+
+  if (user.role === "admin") {
+    return json(
+      {
+        error:
+          "Admin account VIP ကို ပယ်ဖျက်၍မရပါ"
+      },
+      400
+    );
+  }
+
+  const now = Date.now();
+
+  /*
+   * VIP status နဲ့ VIP device binding ပဲရှင်းမယ်။
+   * sessions table ကို လုံးဝမဖျက်ပါ။
+   * ဒါကြောင့် user account auto logout မဖြစ်ပါ။
+   */
+  await env.DB.prepare(
+    `UPDATE users
+     SET vip_until = 0,
+         vip_device_id = NULL,
+         updated_at = ?
+     WHERE id = ?`
+  )
+    .bind(
+      now,
+      userId
+    )
+    .run();
 
   return json({
     ok: true,
     message:
-      "VIP ပယ်ဖျက်ပြီးပါပြီ။"
+      `${user.username} ၏ VIP ကို ပယ်ဖျက်ပြီးပါပြီ။`,
+    user: {
+      id: user.id,
+      username: user.username,
+      vipUntil: 0,
+      isVip: false,
+      vipDeviceBound: false
+    }
   });
 }
