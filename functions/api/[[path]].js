@@ -2,6 +2,47 @@ const SESSION_COOKIE = "__Host-cmflix_session";
 const encoder = new TextEncoder();
 
 const rateStore = new Map();
+let runtimeSettingsCache = {
+  expiresAt: 0,
+  maintenance: "0",
+  message: "CMFLIX ကို ခေတ္တပြုပြင်နေပါသည်။"
+};
+
+async function getRuntimeSettings(env) {
+  const now = Date.now();
+
+  if (runtimeSettingsCache.expiresAt > now) {
+    return runtimeSettingsCache;
+  }
+
+  const result = await env.DB.prepare(
+    `SELECT setting_key, setting_value
+     FROM settings
+     WHERE setting_key IN (
+       'maintenance_mode',
+       'maintenance_message'
+     )`
+  ).all();
+
+  const settings = Object.fromEntries(
+    (result.results || []).map(row => [
+      row.setting_key,
+      row.setting_value
+    ])
+  );
+
+  runtimeSettingsCache = {
+    expiresAt: now + 60_000,
+    maintenance:
+      settings.maintenance_mode || "0",
+    message:
+      settings.maintenance_message ||
+      "CMFLIX ကို ခေတ္တပြုပြင်နေပါသည်။"
+  };
+
+  return runtimeSettingsCache;
+}
+
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -53,26 +94,37 @@ export async function onRequest(context) {
       return protectedDownload(request, env);
     }
 
-    const maintenance = await getSetting(env, "maintenance_mode", "0");
-    const isAdminRoute = path.startsWith("admin/");
+    const runtimeSettings =
+  await getRuntimeSettings(env);
 
-    if (maintenance === "1" && !isAdminRoute) {
-      const auth = await getAuth(request, env);
+const isAdminRoute =
+  path.startsWith("admin/");
 
-      if (!auth || auth.user.role !== "admin") {
-        return json(
-          {
-            error: "maintenance",
-            message: await getSetting(
-              env,
-              "maintenance_message",
-              "CMFLIX ကို ခေတ္တပြုပြင်နေပါသည်။"
-            )
-          },
-          503
-        );
+if (
+  runtimeSettings.maintenance === "1" &&
+  !isAdminRoute
+) {
+  const auth = await getAuth(request, env);
+
+  if (
+    !auth ||
+    auth.user.role !== "admin"
+  ) {
+    return json(
+      {
+        error: "maintenance",
+        message:
+          runtimeSettings.message
+      },
+      503,
+      {
+        "cache-control":
+          "no-store, max-age=0"
       }
-    }
+    );
+  }
+}
+
 
     if (path === "titles" && method === "GET") {
       return publicTitles(request, env, context);
@@ -86,6 +138,20 @@ export async function onRequest(context) {
     if (path === "favorites" && method === "GET") {
       return listFavorites(request, env);
     }
+if (
+  path.startsWith("favorites/") &&
+  method === "GET"
+) {
+  return checkFavorite(
+    request,
+    env,
+    decodeURIComponent(
+      path.slice(
+        "favorites/".length
+      )
+    )
+  );
+}
 
     if (path.startsWith("favorites/") && method === "POST") {
       return addFavorite(
@@ -182,16 +248,50 @@ export async function onRequest(context) {
 
     return json({ error: "API endpoint မတွေ့ပါ" }, 404);
   } catch (error) {
-    console.error(error);
+  const status =
+    Number(error?.status);
+
+  if (
+    Number.isInteger(status) &&
+    status >= 400 &&
+    status < 500
+  ) {
     return json(
       {
-        error: "server_error",
-        message: error?.message || "Server error"
+        error: "bad_request",
+        message:
+          error.message ||
+          "Request မမှန်ပါ"
       },
-      500
+      status,
+      {
+        "cache-control": "no-store"
+      }
     );
   }
+
+  console.error("Unhandled API error", {
+    name: error?.name || "Error",
+    message:
+      error?.message || "Unknown error",
+    stack: error?.stack || ""
+  });
+
+  return json(
+    {
+      error: "server_error",
+      message:
+        "Server error ဖြစ်နေပါသည်။ ခဏနောက် ပြန်စမ်းပါ။"
+    },
+    500,
+    {
+      "cache-control":
+        "no-store, max-age=0"
+    }
+  );
 }
+
+
 
 /* -------------------- Helpers -------------------- */
 
@@ -228,14 +328,74 @@ function vipActive(user, now = Date.now()) {
 }
 
 async function readBody(request) {
-  const contentType = request.headers.get("content-type") || "";
+  const contentType =
+    request.headers.get(
+      "content-type"
+    ) || "";
 
-  if (!contentType.includes("application/json")) {
-    throw new Error("JSON body လိုအပ်ပါသည်");
+  if (
+    !contentType
+      .toLowerCase()
+      .includes("application/json")
+  ) {
+    const error =
+      new Error(
+        "JSON body လိုအပ်ပါသည်"
+      );
+
+    error.status = 415;
+    throw error;
   }
 
-  return request.json();
+  const declaredLength =
+    Number(
+      request.headers.get(
+        "content-length"
+      ) || 0
+    );
+
+  if (
+    Number.isFinite(declaredLength) &&
+    declaredLength > 16_384
+  ) {
+    const error =
+      new Error(
+        "Request body ကြီးလွန်းပါသည်"
+      );
+
+    error.status = 413;
+    throw error;
+  }
+
+  const text = await request.text();
+
+  if (text.length > 16_384) {
+    const error =
+      new Error(
+        "Request body ကြီးလွန်းပါသည်"
+      );
+
+    error.status = 413;
+    throw error;
+  }
+
+  if (!text.trim()) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const error =
+      new Error(
+        "JSON format မမှန်ပါ"
+      );
+
+    error.status = 400;
+    throw error;
+  }
 }
+
 
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
@@ -364,12 +524,47 @@ function clientIP(request) {
   return request.headers.get("CF-Connecting-IP") || "unknown";
 }
 
-function rateLimit(request, action, limit = 10, period = 60000) {
-  const now = Date.now();
-  const key = `${action}:${clientIP(request)}`;
-  const current = rateStore.get(key);
+function pruneRateStore(now) {
+  if (rateStore.size < 2000) {
+    return;
+  }
 
-  if (!current || current.resetAt <= now) {
+  for (const [key, value] of rateStore) {
+    if (value.resetAt <= now) {
+      rateStore.delete(key);
+    }
+  }
+
+  /*
+   * Memory abuse မဖြစ်စေရန် hard limit။
+   * ဒီ limiter က best-effort ပဲဖြစ်ပြီး
+   * distributed limiter မဟုတ်ပါ။
+   */
+  if (rateStore.size > 10000) {
+    rateStore.clear();
+  }
+}
+
+function rateLimit(
+  request,
+  action,
+  limit = 10,
+  period = 60000
+) {
+  const now = Date.now();
+
+  pruneRateStore(now);
+
+  const key =
+    `${action}:${clientIP(request)}`;
+
+  const current =
+    rateStore.get(key);
+
+  if (
+    !current ||
+    current.resetAt <= now
+  ) {
     rateStore.set(key, {
       count: 1,
       resetAt: now + period
@@ -378,14 +573,11 @@ function rateLimit(request, action, limit = 10, period = 60000) {
     return true;
   }
 
-  current.count++;
+  current.count += 1;
 
-  if (current.count > limit) {
-    return false;
-  }
-
-  return true;
+  return current.count <= limit;
 }
+
 
 function sameOrigin(request) {
   const origin = request.headers.get("origin");
@@ -1817,6 +2009,63 @@ async function listFavorites(request, env) {
 
   return json({ items });
 }
+async function checkFavorite(
+  request,
+  env,
+  titleId
+) {
+  const result =
+    await requireAuth(
+      request,
+      env
+    );
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const normalizedTitleId =
+    String(titleId || "")
+      .trim()
+      .slice(0, 100);
+
+  if (!normalizedTitleId) {
+    return json(
+      {
+        error:
+          "Title ID လိုအပ်ပါသည်"
+      },
+      400
+    );
+  }
+
+  const favorite =
+    await env.DB.prepare(
+      `SELECT 1 AS found
+       FROM favorites
+       WHERE user_id = ?
+         AND title_id = ?
+       LIMIT 1`
+    )
+      .bind(
+        result.auth.user.id,
+        normalizedTitleId
+      )
+      .first();
+
+  return json(
+    {
+      favorite:
+        Boolean(favorite)
+    },
+    200,
+    {
+      "cache-control":
+        "private, no-store"
+    }
+  );
+}
+
 
 async function addFavorite(request, env, titleId) {
   const result = await requireAuth(request, env);
