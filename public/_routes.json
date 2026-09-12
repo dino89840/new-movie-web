@@ -3,6 +3,8 @@
   "include": [
     "/",
     "/index.html",
+    "/vip-admin.html",
+    "/download-admin.html",
     "/api/*"
   ],
   "exclude": []
