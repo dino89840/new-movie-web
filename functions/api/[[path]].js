@@ -1,4 +1,4 @@
-const SESSION_COOKIE = "__Host-cmflix_session";   
+const SESSION_COOKIE = "__Host-cmflix_session";
 const encoder = new TextEncoder();
 
 const rateStore = new Map();
