@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="my">
+<head>
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  >
+  <meta name="theme-color" content="#080a0f">
+  <title>CMFLIX Download Admin</title>
+  <link rel="stylesheet" href="/style.css?v=10">
+
+  <style>
+    body {
+      padding: 16px;
+      background: #080a0f;
+      color: #fff;
+    }
+
+    .download-admin {
+      width: min(900px, 100%);
+      margin: 0 auto;
+    }
+
+    .download-admin-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .download-admin-header a {
+      color: #fff;
+      text-decoration: none;
+    }
+
+    .download-admin-search {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #303540;
+      border-radius: 10px;
+      background: #151820;
+      color: #fff;
+      padding: 13px;
+      margin-bottom: 14px;
+    }
+
+    .download-entry {
+      background: #151820;
+      border: 1px solid #282d38;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+
+    .download-entry h3 {
+      margin: 0 0 5px;
+    }
+
+    .download-entry small {
+      color: #9da3af;
+    }
+
+    .download-entry input {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid #363d49;
+      border-radius: 8px;
+      background: #090b10;
+      color: #fff;
+    }
+
+    .download-entry button {
+      width: 100%;
+      margin-top: 9px;
+      border: 0;
+      border-radius: 8px;
+      padding: 12px;
+      background: #e50914;
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .status-message {
+      padding: 16px;
+      text-align: center;
+      color: #b8bec9;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="download-admin">
+    <div class="download-admin-header">
+      <h1>Download Links</h1>
+      <a href="/#/admin">← Main Admin</a>
+    </div>
+
+    <input
+      id="downloadSearch"
+      class="download-admin-search"
+      type="search"
+      placeholder="ဇာတ်ကားအမည်ရှာရန်…"
+    >
+
+    <div id="downloadList">
+      <div class="status-message">
+        Loading…
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="/download-admin.js?v=1"></script>
+</body>
+</html>
