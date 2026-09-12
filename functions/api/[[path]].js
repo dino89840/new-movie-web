@@ -49,6 +49,10 @@ export async function onRequest(context) {
       return protectedPlayback(request, env);
     }
 
+    if (path === "download" && method === "POST") {
+      return protectedDownload(request, env);
+    }
+
     const maintenance = await getSetting(env, "maintenance_mode", "0");
     const isAdminRoute = path.startsWith("admin/");
 
@@ -137,6 +141,21 @@ export async function onRequest(context) {
 
     if (path === "admin/titles/publish-all" && method === "POST") {
       return adminPublishAll(request, env);
+    }
+
+    if (path === "admin/downloads" && method === "GET") {
+      return adminListDownloads(request, env);
+    }
+
+    const downloadAdminMatch =
+      path.match(/^admin\/downloads\/([^/]+)$/);
+
+    if (downloadAdminMatch && method === "PUT") {
+      return adminUpdateDownload(
+        request,
+        env,
+        decodeURIComponent(downloadAdminMatch[1])
+      );
     }
 
     const titleMatch = path.match(/^admin\/titles\/([^/]+)$/);
@@ -2526,6 +2545,435 @@ async function changePassword(request, env) {
       "Password ပြောင်းပြီးပါပြီ"
   });
 }
+function safeDownloadFileName(title, downloadURL) {
+  const cleanTitle = String(title || "movie")
+    .normalize("NFKC")
+    .replace(/[\\/:*?"<>|\u0000-\u001F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120) || "movie";
+
+  let extension = ".mp4";
+
+  try {
+    const parsed = new URL(downloadURL);
+    const lastPart =
+      decodeURIComponent(
+        parsed.pathname.split("/").pop() || ""
+      );
+
+    const extensionMatch =
+      lastPart.match(/(\.[a-zA-Z0-9]{2,6})$/);
+
+    if (extensionMatch) {
+      extension = extensionMatch[1].toLowerCase();
+    }
+  } catch {
+    // URL ထဲက extension မဖတ်နိုင်ရင် .mp4 သုံးမယ်။
+  }
+
+  return `${cleanTitle}${extension}`;
+}
+
+async function requireVipDownloadAccess(
+  request,
+  env
+) {
+  const result =
+    await requireAuth(request, env);
+
+  if (result.error) {
+    return result;
+  }
+
+  const auth = result.auth;
+  const now = Date.now();
+
+  if (
+    Number(auth.user.vipUntil || 0) <= now
+  ) {
+    return {
+      error: json(
+        {
+          error: "vip_required",
+          message:
+            "Download လုပ်ရန် VIP လိုအပ်ပါသည်။"
+        },
+        403,
+        {
+          "cache-control": "no-store"
+        }
+      )
+    };
+  }
+
+  if (!auth.sessionDeviceId) {
+    return {
+      error: json(
+        {
+          error: "device_id_required",
+          message:
+            "Device ID မရပါ။ Logout ထွက်ပြီး ပြန်ဝင်ပါ။"
+        },
+        409,
+        {
+          "cache-control": "no-store"
+        }
+      )
+    };
+  }
+
+  if (!auth.user.vipDeviceId) {
+    await env.DB.prepare(
+      `UPDATE users
+       SET vip_device_id = ?,
+           updated_at = ?
+       WHERE id = ?
+         AND vip_device_id IS NULL`
+    ).bind(
+      auth.sessionDeviceId,
+      now,
+      auth.user.id
+    ).run();
+
+    const updated =
+      await env.DB.prepare(
+        `SELECT vip_device_id
+         FROM users
+         WHERE id = ?
+         LIMIT 1`
+      ).bind(
+        auth.user.id
+      ).first();
+
+    if (
+      updated?.vip_device_id !==
+      auth.sessionDeviceId
+    ) {
+      return {
+        error: json(
+          {
+            error: "vip_device_limit",
+            message:
+              "VIP account ကို တခြားဖုန်းတွင် အသုံးပြုနေပါသည်။"
+          },
+          409,
+          {
+            "cache-control": "no-store"
+          }
+        )
+      };
+    }
+  } else if (
+    auth.user.vipDeviceId !==
+    auth.sessionDeviceId
+  ) {
+    return {
+      error: json(
+        {
+          error: "vip_device_limit",
+          message:
+            "VIP account device မကိုက်ညီပါ။ Admin ကို device reset တောင်းပါ။"
+        },
+        409,
+        {
+          "cache-control": "no-store"
+        }
+      )
+    };
+  }
+
+  return {
+    auth
+  };
+}
+
+async function protectedDownload(
+  request,
+  env
+) {
+  const body = await readBody(request);
+
+  const titleId =
+    String(body.titleId || "").trim();
+
+  if (!titleId) {
+    return json(
+      {
+        error: "Title ID မရှိပါ။"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const title =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         title,
+         category,
+         status,
+         download_url
+       FROM titles
+       WHERE id = ?
+         AND status = 'public'
+       LIMIT 1`
+    ).bind(
+      titleId
+    ).first();
+
+  if (!title) {
+    return json(
+      {
+        error: "ဇာတ်ကားမတွေ့ပါ။"
+      },
+      404,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  /*
+   * Movies မှာ Download မပေးပါ။
+   * series = Free 18+
+   * lugyi = VIP 18+
+   */
+  if (
+    title.category !== "series" &&
+    title.category !== "lugyi"
+  ) {
+    return json(
+      {
+        error: "ဒီဇာတ်ကားမှာ Download မရပါ။"
+      },
+      403,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const vip =
+    await requireVipDownloadAccess(
+      request,
+      env
+    );
+
+  if (vip.error) {
+    return vip.error;
+  }
+
+  const downloadURL =
+    String(title.download_url || "").trim();
+
+  if (!downloadURL) {
+    return json(
+      {
+        error:
+          "ဒီဇာတ်ကားအတွက် Download link မထည့်ရသေးပါ။"
+      },
+      404,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  let parsedURL;
+
+  try {
+    parsedURL = new URL(downloadURL);
+  } catch {
+    return json(
+      {
+        error:
+          "Download link URL မမှန်ပါ။"
+      },
+      500,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  if (
+    parsedURL.protocol !== "https:" &&
+    parsedURL.protocol !== "http:"
+  ) {
+    return json(
+      {
+        error:
+          "Download link protocol မမှန်ပါ။"
+      },
+      500,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  return json(
+    {
+      ok: true,
+      downloadUrl: parsedURL.toString(),
+      fileName: safeDownloadFileName(
+        title.title,
+        parsedURL.toString()
+      )
+    },
+    200,
+    {
+      "cache-control": "no-store"
+    }
+  );
+}
+async function adminListDownloads(
+  request,
+  env
+) {
+  const result =
+    await requireAdmin(request, env);
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const rows =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         title,
+         category,
+         status,
+         download_url,
+         updated_at
+       FROM titles
+       WHERE category IN ('series', 'lugyi')
+       ORDER BY
+         updated_at DESC,
+         created_at DESC
+       LIMIT 500`
+    ).all();
+
+  return json(
+    {
+      items: rows.results || []
+    },
+    200,
+    {
+      "cache-control": "no-store"
+    }
+  );
+}
+
+async function adminUpdateDownload(
+  request,
+  env,
+  titleId
+) {
+  const result =
+    await requireAdmin(
+      request,
+      env,
+      true
+    );
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const body = await readBody(request);
+
+  const downloadURL =
+    String(body.downloadUrl || "").trim();
+
+  if (downloadURL) {
+    let parsed;
+
+    try {
+      parsed = new URL(downloadURL);
+    } catch {
+      return json(
+        {
+          error:
+            "Download URL format မမှန်ပါ။"
+        },
+        400
+      );
+    }
+
+    if (
+      parsed.protocol !== "https:" &&
+      parsed.protocol !== "http:"
+    ) {
+      return json(
+        {
+          error:
+            "http/https link သာထည့်ပါ။"
+        },
+        400
+      );
+    }
+  }
+
+  const title =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         title,
+         category
+       FROM titles
+       WHERE id = ?
+       LIMIT 1`
+    ).bind(
+      titleId
+    ).first();
+
+  if (!title) {
+    return json(
+      {
+        error: "ဇာတ်ကားမတွေ့ပါ။"
+      },
+      404
+    );
+  }
+
+  if (
+    title.category !== "series" &&
+    title.category !== "lugyi"
+  ) {
+    return json(
+      {
+        error:
+          "Movies category မှာ Download မထည့်ရပါ။"
+      },
+      400
+    );
+  }
+
+  await env.DB.prepare(
+    `UPDATE titles
+     SET download_url = ?,
+         updated_at = ?
+     WHERE id = ?`
+  ).bind(
+    downloadURL,
+    Date.now(),
+    titleId
+  ).run();
+
+  return json({
+    ok: true,
+    id: title.id,
+    title: title.title,
+    downloadUrl: downloadURL
+  });
+}
+
 async function protectedPlayback(
   request,
   env
