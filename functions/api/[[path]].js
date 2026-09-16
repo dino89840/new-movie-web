@@ -177,15 +177,61 @@ if (
       );
     }
 
-    if (path === "admin/vip-users" && method === "GET") {
-  return adminSearchVipUsers(request, env);
+    /*
+ * Admin user search
+ *
+ * Password hash/salt ကို response ထဲ လုံးဝမပို့ပါ။
+ */
+if (
+  path === "admin/users" &&
+  method === "GET"
+) {
+  return adminSearchUsers(
+    request,
+    env
+  );
+}
+
+/*
+ * Admin က normal user ရဲ့ password ကို
+ * အသစ် reset လုပ်ပေးရန်။
+ */
+const adminPasswordResetMatch =
+  path.match(
+    /^admin\/users\/([^/]+)\/reset-password$/
+  );
+
+if (
+  adminPasswordResetMatch &&
+  method === "POST"
+) {
+  return adminResetUserPassword(
+    request,
+    env,
+    decodeURIComponent(
+      adminPasswordResetMatch[1]
+    )
+  );
+}
+
+if (
+  path === "admin/vip-users" &&
+  method === "GET"
+) {
+  return adminSearchVipUsers(
+    request,
+    env
+  );
 }
 
 if (
   path === "admin/promo-codes" &&
   method === "POST"
 ) {
-  return adminCreatePromoCode(request, env);
+  return adminCreatePromoCode(
+    request,
+    env
+  );
 }
 
 
@@ -490,7 +536,7 @@ async function sha256(value) {
   return bytesToBase64Url(new Uint8Array(digest));
 }
 
-async function hashPassword(password, saltValue = null, iterations = 100000) {
+async function hashPassword(password, saltValue = null, iterations = 600000) {
   const salt = saltValue
     ? base64UrlToBytes(saltValue)
     : crypto.getRandomValues(new Uint8Array(16));
@@ -1192,6 +1238,388 @@ async function me(request, env) {
     user: auth.user,
     csrf: auth.csrf
   });
+}
+/* -------------------- Admin user password reset -------------------- */
+
+async function adminSearchUsers(
+  request,
+  env
+) {
+  const result =
+    await requireAdmin(
+      request,
+      env
+    );
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const url =
+    new URL(request.url);
+
+  const query =
+    String(
+      url.searchParams.get("q") ||
+      ""
+    ).trim();
+
+  if (
+    query.length < 2 ||
+    query.length > 100
+  ) {
+    return json(
+      {
+        error:
+          "Username သို့မဟုတ် email အနည်းဆုံး 2 လုံး ရိုက်ထည့်ပါ"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  /*
+   * Wildcard အဖြစ် ရှာရန်။
+   * SQL value ကို bind() သုံးထားလို့
+   * SQL injection မဖြစ်စေပါ။
+   */
+  const searchValue =
+    `%${query}%`;
+
+  const users =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         username,
+         email,
+         role,
+         status,
+         vip_until,
+         created_at,
+         updated_at
+       FROM users
+       WHERE role = 'user'
+         AND (
+           username LIKE ? COLLATE NOCASE
+           OR email LIKE ? COLLATE NOCASE
+         )
+       ORDER BY
+         username COLLATE NOCASE ASC
+       LIMIT 20`
+    ).bind(
+      searchValue,
+      searchValue
+    ).all();
+
+  return json(
+    {
+      items:
+        (users.results || []).map(
+          user => ({
+            id: user.id,
+            username:
+              user.username,
+            email:
+              user.email,
+            role:
+              user.role,
+            status:
+              user.status,
+            vipUntil:
+              Number(
+                user.vip_until || 0
+              ),
+            createdAt:
+              Number(
+                user.created_at || 0
+              ),
+            updatedAt:
+              Number(
+                user.updated_at || 0
+              )
+          })
+        )
+    },
+    200,
+    {
+      "cache-control":
+        "no-store, max-age=0"
+    }
+  );
+}
+
+async function adminResetUserPassword(
+  request,
+  env,
+  userId
+) {
+  /*
+   * mutation=true ဖြစ်တဲ့အတွက်
+   * requireAdmin က admin role၊
+   * same-origin နဲ့ CSRF token ကို
+   * စစ်ပေးပါမယ်။
+   */
+  const result =
+    await requireAdmin(
+      request,
+      env,
+      true
+    );
+
+  if (result.error) {
+    return result.error;
+  }
+
+  /*
+   * Stolen admin session နဲ့ password reset
+   * အများကြီးမလုပ်နိုင်ရန် rate limit။
+   */
+  if (
+    !rateLimit(
+      request,
+      `admin-password-reset:${result.auth.user.id}`,
+      20,
+      60 * 60 * 1000
+    )
+  ) {
+    return json(
+      {
+        error:
+          "Password reset အကြိမ်များလွန်းပါသည်။ ခဏနောက်ပြန်စမ်းပါ"
+      },
+      429,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const normalizedUserId =
+    String(userId || "").trim();
+
+  if (!normalizedUserId) {
+    return json(
+      {
+        error:
+          "User ID မမှန်ပါ"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const body =
+    await readBody(request);
+
+  const newPassword =
+    String(
+      body.newPassword || ""
+    );
+
+  const adminPassword =
+    String(
+      body.adminPassword || ""
+    );
+
+  if (
+    newPassword.length < 8 ||
+    newPassword.length > 128
+  ) {
+    return json(
+      {
+        error:
+          "Password အသစ်ကို 8 လုံးမှ 128 လုံးအတွင်းထားပါ"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  if (!adminPassword) {
+    return json(
+      {
+        error:
+          "အတည်ပြုရန် admin password လိုအပ်ပါသည်"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  /*
+   * Password reset မလုပ်ခင် လက်ရှိ admin ရဲ့
+   * password ကို ထပ်စစ်ပါမယ်။
+   */
+  const admin =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         password_hash,
+         password_salt,
+         password_iterations
+       FROM users
+       WHERE id = ?
+         AND role = 'admin'
+         AND status = 'active'
+       LIMIT 1`
+    ).bind(
+      result.auth.user.id
+    ).first();
+
+  if (!admin) {
+    return json(
+      {
+        error:
+          "Admin account ကိုအတည်ပြု၍မရပါ"
+      },
+      403,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const adminPasswordData =
+    await hashPassword(
+      adminPassword,
+      admin.password_salt,
+      Number(
+        admin.password_iterations ||
+        100000
+      )
+    );
+
+  if (
+    !safeEqual(
+      adminPasswordData.hash,
+      admin.password_hash
+    )
+  ) {
+    return json(
+      {
+        error:
+          "Admin password မှားနေပါသည်"
+      },
+      403,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  /*
+   * Admin account ကို ဒီ endpoint နဲ့
+   * reset မလုပ်စေရပါ။
+   * Normal user account ကိုသာ ခွင့်ပြုထားပါတယ်။
+   */
+  const targetUser =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         username,
+         email,
+         role,
+         status
+       FROM users
+       WHERE id = ?
+         AND role = 'user'
+       LIMIT 1`
+    ).bind(
+      normalizedUserId
+    ).first();
+
+  if (!targetUser) {
+    return json(
+      {
+        error:
+          "Reset လုပ်နိုင်သော user မတွေ့ပါ"
+      },
+      404,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  /*
+   * Salt အသစ်နဲ့ password hash အသစ်
+   * ထုတ်ပါမယ်။
+   *
+   * ဒီ user အတွက် 600,000 iterations သုံးထားပါတယ်။
+   * User record ထဲမှာ iterations သီးသန့်
+   * သိမ်းထားပြီးသားဖြစ်လို့ password အဟောင်းတွေနဲ့
+   * compatibility မပျက်ပါ။
+   */
+  const passwordData =
+    await hashPassword(
+      newPassword,
+      null,
+      600000
+    );
+
+  const now =
+    Date.now();
+
+  /*
+   * Password ပြောင်းခြင်းနဲ့ existing sessions
+   * အားလုံးဖြုတ်ခြင်းကို D1 batch နဲ့လုပ်မယ်။
+   */
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE users
+       SET password_hash = ?,
+           password_salt = ?,
+           password_iterations = ?,
+           updated_at = ?
+       WHERE id = ?
+         AND role = 'user'`
+    ).bind(
+      passwordData.hash,
+      passwordData.salt,
+      passwordData.iterations,
+      now,
+      targetUser.id
+    ),
+
+    env.DB.prepare(
+      `DELETE FROM sessions
+       WHERE user_id = ?`
+    ).bind(
+      targetUser.id
+    )
+  ]);
+
+  return json(
+    {
+      ok: true,
+      message:
+        `${targetUser.username} ရဲ့ password ကို reset လုပ်ပြီးပါပြီ။ ` +
+        "ယခင် login sessions အားလုံးလည်း logout ဖြစ်သွားပါမယ်။",
+      user: {
+        id:
+          targetUser.id,
+        username:
+          targetUser.username,
+        email:
+          targetUser.email,
+        status:
+          targetUser.status
+      }
+    },
+    200,
+    {
+      "cache-control":
+        "no-store, max-age=0"
+    }
+  );
 }
 
 /* -------------------- Settings -------------------- */
