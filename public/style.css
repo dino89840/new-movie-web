@@ -2300,3 +2300,62 @@ body {
     line-height: 1.25;
   }
 }
+/* ---------- Admin user password reset ---------- */
+
+.password-user-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.password-user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.password-user-row p {
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+}
+
+.password-user-row .button {
+  flex: 0 0 auto;
+}
+
+.issued-password {
+  display: block;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #080a0f;
+  color: var(--success);
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+@media (max-width: 520px) {
+  .password-user-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .password-user-row .button {
+    width: 100%;
+  }
+}
