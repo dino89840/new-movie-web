@@ -71,6 +71,122 @@ function escapeHTML(value) {
     .replaceAll("'", "&#039;");
 }
 
+/*
+ * TMDB က 3.289 လို decimal အရှည်ပြန်ပေးရင်
+ * ဒုတိယ decimal နောက်ပိုင်းကို ဖြတ်ပြီး 3.2 လုပ်မယ်။
+ *
+ * Math.round() မသုံးပါ။
+ * Math.round() သုံးရင် 3.289 က 3.3 ဖြစ်နိုင်ပါတယ်။
+ */
+function normalizeRating(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    String(value).trim() === ""
+  ) {
+    return "";
+  }
+
+  const numericValue =
+    Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return "";
+  }
+
+  const limitedValue =
+    Math.min(
+      10,
+      Math.max(0, numericValue)
+    );
+
+  const truncatedValue =
+    Math.floor(
+      (limitedValue + Number.EPSILON) * 10
+    ) / 10;
+
+  return truncatedValue.toFixed(1);
+}
+
+function normalizeVisibleRatingInput() {
+  const ratingInput =
+    document.querySelector(
+      'input[name="rating"], #rating'
+    );
+
+  if (!ratingInput) {
+    return;
+  }
+
+  const normalized =
+    normalizeRating(
+      ratingInput.value
+    );
+
+  if (
+    normalized !== "" &&
+    ratingInput.value !== normalized
+  ) {
+    ratingInput.value = normalized;
+  }
+}
+
+/*
+ * TMDB result button နှိပ်ပြီး form ဖြည့်ပြီးသွားတဲ့
+ * နောက် frame မှာ rating ကို normalize လုပ်မယ်။
+ *
+ * Event delegation သုံးထားလို့ admin form ကို
+ * innerHTML နဲ့အသစ် render လုပ်သော်လည်း အလုပ်လုပ်ပါတယ်။
+ */
+document.addEventListener(
+  "click",
+  () => {
+    requestAnimationFrame(() => {
+      normalizeVisibleRatingInput();
+    });
+  },
+  true
+);
+
+/*
+ * Save button နှိပ်ချိန် browser validation မစခင်
+ * rating ကို valid 0.1 step ဖြစ်အောင်လုပ်မယ်။
+ */
+document.addEventListener(
+  "pointerdown",
+  () => {
+    normalizeVisibleRatingInput();
+  },
+  true
+);
+
+/*
+ * Rating ကို manual ပြင်ပြီး field ကထွက်ချိန်မှာလည်း
+ * decimal တစ်လုံးဖြစ်အောင်လုပ်မယ်။
+ */
+document.addEventListener(
+  "focusout",
+  event => {
+    if (
+      !event.target.matches(
+        'input[name="rating"], #rating'
+      )
+    ) {
+      return;
+    }
+
+    const normalized =
+      normalizeRating(
+        event.target.value
+      );
+
+    if (normalized !== "") {
+      event.target.value = normalized;
+    }
+  },
+  true
+);
+
 function toast(message) {
   toastElement.textContent = message;
   toastElement.classList.add("show");
