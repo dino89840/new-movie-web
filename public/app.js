@@ -1433,6 +1433,602 @@ async function renderFavorites() {
     `;
   }
 }
+function generateResetPassword(
+  length = 16
+) {
+  const groups = [
+    "ABCDEFGHJKLMNPQRSTUVWXYZ",
+    "abcdefghijkmnopqrstuvwxyz",
+    "23456789",
+    "!@#$%*+-_"
+  ];
+
+  const allCharacters =
+    groups.join("");
+
+  const randomCharacter =
+    characters => {
+      const values =
+        new Uint32Array(1);
+
+      crypto.getRandomValues(
+        values
+      );
+
+      return characters[
+        values[0] %
+        characters.length
+      ];
+    };
+
+  const passwordCharacters =
+    groups.map(
+      randomCharacter
+    );
+
+  while (
+    passwordCharacters.length <
+    length
+  ) {
+    passwordCharacters.push(
+      randomCharacter(
+        allCharacters
+      )
+    );
+  }
+
+  /*
+   * Secure random shuffle
+   */
+  for (
+    let index =
+      passwordCharacters.length - 1;
+    index > 0;
+    index--
+  ) {
+    const values =
+      new Uint32Array(1);
+
+    crypto.getRandomValues(
+      values
+    );
+
+    const randomIndex =
+      values[0] %
+      (index + 1);
+
+    [
+      passwordCharacters[index],
+      passwordCharacters[randomIndex]
+    ] = [
+      passwordCharacters[randomIndex],
+      passwordCharacters[index]
+    ];
+  }
+
+  return passwordCharacters.join("");
+}
+
+function openAdminPasswordReset() {
+  if (
+    !state.user ||
+    state.user.role !== "admin"
+  ) {
+    toast(
+      "Admin account လိုအပ်ပါသည်"
+    );
+
+    return;
+  }
+
+  const showSearchForm = () => {
+    authContent.innerHTML = `
+      <h2>User Password Reset</h2>
+
+      <p class="muted">
+        Username သို့မဟုတ် email ဖြင့်
+        user ကိုရှာပါ။
+      </p>
+
+      <form
+        id="passwordUserSearchForm"
+        class="form-stack"
+      >
+        <label class="field">
+          <span>Username or email</span>
+
+          <input
+            name="query"
+            required
+            minlength="2"
+            maxlength="100"
+            autocomplete="off"
+            placeholder="ဥပမာ user123"
+          >
+        </label>
+
+        <button
+          class="button"
+          type="submit"
+        >
+          User ရှာမည်
+        </button>
+      </form>
+
+      <div
+        id="passwordUserResults"
+        class="password-user-list"
+      ></div>
+
+      <button
+        id="backToAccount"
+        class="button secondary"
+        type="button"
+      >
+        Account သို့ပြန်မည်
+      </button>
+    `;
+
+    const searchForm =
+      document.querySelector(
+        "#passwordUserSearchForm"
+      );
+
+    const resultsElement =
+      document.querySelector(
+        "#passwordUserResults"
+      );
+
+    document
+      .querySelector(
+        "#backToAccount"
+      )
+      ?.addEventListener(
+        "click",
+        () => openAuth()
+      );
+
+    searchForm
+      ?.addEventListener(
+        "submit",
+        async event => {
+          event.preventDefault();
+
+          const formData =
+            new FormData(
+              searchForm
+            );
+
+          const query =
+            String(
+              formData.get(
+                "query"
+              ) || ""
+            ).trim();
+
+          if (
+            query.length < 2
+          ) {
+            toast(
+              "အနည်းဆုံး 2 လုံး ရိုက်ထည့်ပါ"
+            );
+
+            return;
+          }
+
+          resultsElement.innerHTML = `
+            <section class="loading-card">
+              User ရှာနေသည်…
+            </section>
+          `;
+
+          try {
+            const data =
+              await api(
+                "admin/users?q=" +
+                encodeURIComponent(
+                  query
+                )
+              );
+
+            const users =
+              data.items || [];
+
+            if (!users.length) {
+              resultsElement.innerHTML = `
+                <section class="empty-card">
+                  User မတွေ့ပါ
+                </section>
+              `;
+
+              return;
+            }
+
+            resultsElement.innerHTML =
+              users.map(user => `
+                <div
+                  class="password-user-row"
+                >
+                  <div>
+                    <strong>
+                      ${escapeHTML(
+                        user.username
+                      )}
+                    </strong>
+
+                    <p class="muted">
+                      ${escapeHTML(
+                        user.email
+                      )}
+                    </p>
+
+                    <small
+                      class="${
+                        user.status ===
+                        "active"
+                          ? "status-public"
+                          : "status-draft"
+                      }"
+                    >
+                      ${escapeHTML(
+                        user.status
+                      )}
+                    </small>
+                  </div>
+
+                  <button
+                    class="button small"
+                    type="button"
+                    data-reset-user-id="${escapeHTML(
+                      user.id
+                    )}"
+                  >
+                    Password Reset
+                  </button>
+                </div>
+              `).join("");
+
+            resultsElement
+              .querySelectorAll(
+                "[data-reset-user-id]"
+              )
+              .forEach(
+                button => {
+                  button.addEventListener(
+                    "click",
+                    () => {
+                      const user =
+                        users.find(
+                          item =>
+                            item.id ===
+                            button.dataset
+                              .resetUserId
+                        );
+
+                      if (user) {
+                        showResetForm(
+                          user
+                        );
+                      }
+                    }
+                  );
+                }
+              );
+          } catch (error) {
+            resultsElement.innerHTML = `
+              <section class="empty-card">
+                ${escapeHTML(
+                  error.message
+                )}
+              </section>
+            `;
+          }
+        }
+      );
+  };
+
+  const showResetForm =
+    user => {
+      const generatedPassword =
+        generateResetPassword();
+
+      authContent.innerHTML = `
+        <h2>Password အသစ်သတ်မှတ်မည်</h2>
+
+        <div class="admin-card">
+          <strong>
+            ${escapeHTML(
+              user.username
+            )}
+          </strong>
+
+          <p class="muted">
+            ${escapeHTML(
+              user.email
+            )}
+          </p>
+        </div>
+
+        <form
+          id="adminPasswordResetForm"
+          class="form-stack"
+        >
+          <label class="field">
+            <span>
+              User password အသစ်
+            </span>
+
+            <input
+              id="newUserPassword"
+              name="newPassword"
+              type="text"
+              required
+              minlength="8"
+              maxlength="128"
+              autocomplete="new-password"
+              value="${escapeHTML(
+                generatedPassword
+              )}"
+            >
+          </label>
+
+          <button
+            id="generatePasswordButton"
+            class="button secondary"
+            type="button"
+          >
+            Password အသစ် Generate လုပ်မည်
+          </button>
+
+          <label class="field">
+            <span>
+              အတည်ပြုရန် သင့် Admin password
+            </span>
+
+            <input
+              name="adminPassword"
+              type="password"
+              required
+              maxlength="128"
+              autocomplete="current-password"
+            >
+          </label>
+
+          <button
+            class="button danger"
+            type="submit"
+          >
+            Password ကို Reset လုပ်မည်
+          </button>
+        </form>
+
+        <button
+          id="backToUserSearch"
+          class="button secondary"
+          type="button"
+        >
+          User Search သို့ပြန်မည်
+        </button>
+      `;
+
+      const resetForm =
+        document.querySelector(
+          "#adminPasswordResetForm"
+        );
+
+      const newPasswordInput =
+        document.querySelector(
+          "#newUserPassword"
+        );
+
+      document
+        .querySelector(
+          "#generatePasswordButton"
+        )
+        ?.addEventListener(
+          "click",
+          () => {
+            newPasswordInput.value =
+              generateResetPassword();
+          }
+        );
+
+      document
+        .querySelector(
+          "#backToUserSearch"
+        )
+        ?.addEventListener(
+          "click",
+          showSearchForm
+        );
+
+      resetForm
+        ?.addEventListener(
+          "submit",
+          async event => {
+            event.preventDefault();
+
+            const formData =
+              new FormData(
+                resetForm
+              );
+
+            const newPassword =
+              String(
+                formData.get(
+                  "newPassword"
+                ) || ""
+              );
+
+            const adminPassword =
+              String(
+                formData.get(
+                  "adminPassword"
+                ) || ""
+              );
+
+            const confirmed =
+              confirm(
+                `${user.username} ရဲ့ password ကို reset လုပ်မှာသေချာပါသလား?\n\n` +
+                "လက်ရှိ login ဝင်ထားသော devices အားလုံး logout ဖြစ်သွားပါမယ်။"
+              );
+
+            if (!confirmed) {
+              return;
+            }
+
+            const submitButton =
+              resetForm.querySelector(
+                'button[type="submit"]'
+              );
+
+            submitButton.disabled =
+              true;
+
+            submitButton.textContent =
+              "Reset လုပ်နေသည်…";
+
+            try {
+              const data =
+                await api(
+                  `admin/users/${encodeURIComponent(
+                    user.id
+                  )}/reset-password`,
+                  {
+                    method: "POST",
+                    body:
+                      JSON.stringify({
+                        newPassword,
+                        adminPassword
+                      })
+                  }
+                );
+
+              authContent.innerHTML = `
+                <h2>Password Reset ပြီးပါပြီ</h2>
+
+                <section class="admin-card">
+                  <p>
+                    <strong>
+                      ${escapeHTML(
+                        user.username
+                      )}
+                    </strong>
+                  </p>
+
+                  <p class="muted">
+                    User ကိုအောက်ပါ password
+                    အသစ်ပေးပါ။
+                  </p>
+
+                  <code
+                    id="issuedPassword"
+                    class="issued-password"
+                  >
+                    ${escapeHTML(
+                      newPassword
+                    )}
+                  </code>
+
+                  <button
+                    id="copyIssuedPassword"
+                    class="button"
+                    type="button"
+                  >
+                    Password Copy
+                  </button>
+                </section>
+
+                <p class="muted">
+                  ${escapeHTML(
+                    data.message ||
+                    ""
+                  )}
+                </p>
+
+                <button
+                  id="resetAnotherUser"
+                  class="button secondary"
+                  type="button"
+                >
+                  နောက် User တစ်ယောက် Reset လုပ်မည်
+                </button>
+              `;
+
+              document
+                .querySelector(
+                  "#copyIssuedPassword"
+                )
+                ?.addEventListener(
+                  "click",
+                  async () => {
+                    try {
+                      await navigator
+                        .clipboard
+                        .writeText(
+                          newPassword
+                        );
+
+                      toast(
+                        "Password copy လုပ်ပြီးပါပြီ"
+                      );
+                    } catch {
+                      toast(
+                        "Copy မလုပ်နိုင်ပါ။ Password ကို manual copy လုပ်ပါ"
+                      );
+                    }
+                  }
+                );
+
+              document
+                .querySelector(
+                  "#resetAnotherUser"
+                )
+                ?.addEventListener(
+                  "click",
+                  showSearchForm
+                );
+
+              toast(
+                "Password reset အောင်မြင်ပါသည်"
+              );
+            } catch (error) {
+              toast(
+                error.message
+              );
+
+              submitButton.disabled =
+                false;
+
+              submitButton.textContent =
+                "Password ကို Reset လုပ်မည်";
+            }
+          }
+        );
+    };
+
+  showSearchForm();
+}
+
+/*
+ * Account dialog ကို innerHTML နဲ့
+ * ပြန်ဆောက်ထားတာဖြစ်လို့ event delegation သုံးပါမယ်။
+ */
+document.addEventListener(
+  "click",
+  event => {
+    const button =
+      event.target.closest(
+        "#openPasswordReset"
+      );
+
+    if (!button) {
+      return;
+    }
+
+    openAdminPasswordReset();
+  }
+);
 
 function openAuth(mode = "login") {
   if (state.user) {
@@ -1441,10 +2037,27 @@ function openAuth(mode = "login") {
       <p class="muted">${escapeHTML(state.user.email)}</p>
 
       ${
-        state.user.role === "admin"
-          ? `<button id="goAdmin" class="button">Admin Panel</button>`
-          : ""
-      }
+  state.user.role === "admin"
+    ? `
+      <button
+        id="goAdmin"
+        class="button"
+        type="button"
+      >
+        Admin Panel
+      </button>
+
+      <button
+        id="openPasswordReset"
+        class="button secondary"
+        type="button"
+      >
+        User Password Reset
+      </button>
+    `
+    : ""
+}
+
 
       <button id="logoutButton" class="button secondary">
         Logout
