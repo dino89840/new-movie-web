@@ -83,8 +83,16 @@ export async function onRequest(context) {
     }
 
     if (path === "account/password" && method === "POST") {
-      return changePassword(request, env);
-    }
+  return changePassword(request, env);
+}
+
+if (
+  path === "account/promo/redeem" &&
+  method === "POST"
+) {
+  return redeemPromoCode(request, env);
+}
+
 
     if (path === "play" && method === "POST") {
       return protectedPlayback(request, env);
@@ -170,8 +178,16 @@ if (
     }
 
     if (path === "admin/vip-users" && method === "GET") {
-      return adminSearchVipUsers(request, env);
-    }
+  return adminSearchVipUsers(request, env);
+}
+
+if (
+  path === "admin/promo-codes" &&
+  method === "POST"
+) {
+  return adminCreatePromoCode(request, env);
+}
+
 
     const vipUserMatch =
       path.match(/^admin\/vip-users\/([^/]+)\/(extend|reset-device|cancel)$/);
@@ -710,7 +726,9 @@ async function getAuth(request, env) {
        u.role,
        u.status,
        u.vip_until,
-       u.vip_device_id
+u.vip_plan_months,
+u.vip_device_id
+
      FROM sessions AS s
      JOIN users AS u
        ON u.id = s.user_id
@@ -738,6 +756,9 @@ async function getAuth(request, env) {
       role: row.role,
       vipUntil:
         Number(row.vip_until || 0),
+        planMonths:
+  Number(row.vip_plan_months || 0),
+
       isVip:
         Number(row.vip_until || 0) > now,
       vipDeviceBound:
@@ -3438,65 +3459,96 @@ async function adminSearchVipUsers(
   env
 ) {
   const result =
-    await requireAdmin(request, env);
+    await requireAdmin(
+      request,
+      env
+    );
 
   if (result.error) {
     return result.error;
   }
 
-  const url = new URL(request.url);
-  const query =
-    String(url.searchParams.get("q") || "")
-      .trim()
-      .slice(0, 100);
+  const url =
+    new URL(request.url);
 
-  if (query.length < 2) {
-    return json({
-      items: []
-    });
+  const query =
+    String(
+      url.searchParams.get("q") || ""
+    ).trim();
+
+  if (
+    query.length < 2 ||
+    query.length > 50
+  ) {
+    return json(
+      {
+        error:
+          "Search စာလုံး 2 မှ 50 လုံးအတွင်းထည့်ပါ"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
   }
 
-  const prefix = `${query}%`;
+  const like =
+    `%${query.replace(/[%_]/g, "")}%`;
 
-  const rows = await env.DB.prepare(
-    `SELECT
-       id,
-       username,
-       email,
-       status,
-       vip_until,
-       vip_device_id,
-       created_at
-     FROM users
-     WHERE role = 'user'
-       AND (
-         username LIKE ? COLLATE NOCASE
-         OR email LIKE ? COLLATE NOCASE
-       )
-     ORDER BY username ASC
-     LIMIT 30`
-  ).bind(
-    prefix,
-    prefix
-  ).all();
+  const rows =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         username,
+         email,
+         role,
+         status,
+         vip_until,
+         vip_plan_months,
+         vip_device_id
+       FROM users
+       WHERE username LIKE ? COLLATE NOCASE
+          OR email LIKE ? COLLATE NOCASE
+       ORDER BY updated_at DESC
+       LIMIT 30`
+    ).bind(
+      like,
+      like
+    ).all();
 
   const now = Date.now();
 
-  return json({
-    items:
-      (rows.results || []).map(user => ({
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        status: user.status,
-        vipUntil:
-          Number(user.vip_until || 0),
-        isVip:
-          Number(user.vip_until || 0) > now,
-        vipDeviceBound:
-          Boolean(user.vip_device_id)
-      }))
-  });
+  return json(
+    {
+      items:
+        (rows.results || [])
+          .map(user => ({
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            role: user.role,
+            status: user.status,
+            vipUntil:
+              Number(user.vip_until || 0),
+            planMonths:
+              Number(
+                user.vip_plan_months || 0
+              ),
+            isVip:
+              Number(user.vip_until || 0)
+                > now,
+            vipDeviceBound:
+              Boolean(
+                user.vip_device_id
+              )
+          }))
+    },
+    200,
+    {
+      "cache-control":
+        "no-store, max-age=0"
+    }
+  );
 }
 
 async function adminExtendVip(
@@ -3505,79 +3557,157 @@ async function adminExtendVip(
   userId
 ) {
   const result =
-    await requireAdmin(request, env, true);
+    await requireAdmin(
+      request,
+      env,
+      true
+    );
 
   if (result.error) {
     return result.error;
   }
 
-  const body = await readBody(request);
-  const days = Math.floor(
-    Number(body.days || 0)
-  );
+  const body =
+    await readBody(request);
 
-  if (
-    !Number.isFinite(days) ||
-    days < 1 ||
-    days > 3650
-  ) {
+  const planMonths =
+    normalizePlanMonths(
+      body.planMonths
+    );
+
+  if (!planMonths) {
     return json(
       {
         error:
-          "VIP days သည် 1 မှ 3650 အတွင်းဖြစ်ရပါမည်"
+          "1, 3, 6 သို့မဟုတ် 12 Month Plan ရွေးပါ"
       },
-      400
+      400,
+      {
+        "cache-control": "no-store"
+      }
     );
   }
 
-  const user = await env.DB.prepare(
-    `SELECT id, vip_until
-     FROM users
-     WHERE id = ?
-       AND role = 'user'
-     LIMIT 1`
-  ).bind(userId).first();
+  const user =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         vip_until
+       FROM users
+       WHERE id = ?
+       LIMIT 1`
+    ).bind(userId).first();
 
   if (!user) {
     return json(
-      { error: "User မတွေ့ပါ" },
-      404
+      {
+        error:
+          "User မတွေ့ပါ"
+      },
+      404,
+      {
+        "cache-control": "no-store"
+      }
     );
   }
 
   const now = Date.now();
-  const oldVipUntil =
-    Number(user.vip_until || 0);
 
-  const base =
-    Math.max(now, oldVipUntil);
+  const baseTime =
+    Math.max(
+      now,
+      Number(user.vip_until || 0)
+    );
 
-  const vipUntil =
-    base + days * 86400000;
+  const newVipUntil =
+    baseTime +
+    vipPlanDurationMs(planMonths);
 
   await env.DB.prepare(
     `UPDATE users
      SET vip_until = ?,
-         vip_device_id =
-           CASE
-             WHEN vip_until <= ?
-             THEN NULL
-             ELSE vip_device_id
-           END,
+         vip_plan_months = ?,
          updated_at = ?
      WHERE id = ?`
   ).bind(
-    vipUntil,
-    now,
+    newVipUntil,
+    planMonths,
     now,
     userId
   ).run();
 
-  return json({
-    ok: true,
-    vipUntil
-  });
+  return json(
+    {
+      ok: true,
+      vipUntil:
+        newVipUntil,
+      planMonths,
+      message:
+        `${planMonths} Month VIP Plan ထည့်ပြီးပါပြီ`
+    },
+    200,
+    {
+      "cache-control":
+        "no-store, max-age=0"
+    }
+  );
 }
+
+async function adminCancelVip(
+  request,
+  env,
+  userId
+) {
+  const result =
+    await requireAdmin(
+      request,
+      env,
+      true
+    );
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const now = Date.now();
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE users
+       SET vip_until = 0,
+           vip_plan_months = 0,
+           vip_device_id = NULL,
+           updated_at = ?
+       WHERE id = ?`
+    ).bind(
+      now,
+      userId
+    ),
+
+    /*
+     * VIP cancel ပြီးတာ app က ချက်ချင်းသိအောင်
+     * user session တွေကိုရှင်းသည်။
+     */
+    env.DB.prepare(
+      `DELETE FROM sessions
+       WHERE user_id = ?`
+    ).bind(userId)
+  ]);
+
+  return json(
+    {
+      ok: true,
+      message:
+        "VIP ပယ်ဖျက်ပြီးပါပြီ"
+    },
+    200,
+    {
+      "cache-control":
+        "no-store, max-age=0"
+    }
+  );
+}
+
 
 async function adminResetVipDevice(
   request,
@@ -3616,10 +3746,327 @@ async function adminResetVipDevice(
   });
 }
 
-async function adminCancelVip(
+
+
+const ALLOWED_VIP_PLANS =
+  new Set([1, 3, 6, 12]);
+
+function normalizePlanMonths(value) {
+  const months = Number(value);
+
+  if (
+    !Number.isInteger(months) ||
+    !ALLOWED_VIP_PLANS.has(months)
+  ) {
+    return 0;
+  }
+
+  return months;
+}
+
+function vipPlanDurationMs(months) {
+  /*
+   * လက်ရှိ VIP system က milliseconds/days အခြေခံဖြစ်လို့
+   * 1 month = 30 days အဖြစ် သတ်မှတ်ထားသည်။
+   */
+  return months * 30 * 86400000;
+}
+
+function normalizePromoCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+function randomPromoPart(length = 4) {
+  const alphabet =
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+  const bytes =
+    crypto.getRandomValues(
+      new Uint8Array(length)
+    );
+
+  let result = "";
+
+  for (const byte of bytes) {
+    result +=
+      alphabet[
+        byte % alphabet.length
+      ];
+  }
+
+  return result;
+}
+
+function createReadablePromoCode() {
+  return [
+    "CMF",
+    randomPromoPart(4),
+    randomPromoPart(4),
+    randomPromoPart(4)
+  ].join("-");
+}
+
+async function redeemPromoCode(request, env) {
+  if (
+    !rateLimit(
+      request,
+      "promo-redeem",
+      10,
+      60 * 60 * 1000
+    )
+  ) {
+    return json(
+      {
+        error:
+          "Promo Code စမ်းသပ်မှုများလွန်းပါသည်။ ခဏနောက် ပြန်စမ်းပါ။"
+      },
+      429,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const result =
+    await requireAuth(request, env);
+
+  if (result.error) {
+    return result.error;
+  }
+
+  if (!sameOrigin(request)) {
+    return json(
+      {
+        error:
+          "Invalid request origin"
+      },
+      403,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const csrf =
+    request.headers.get(
+      "x-csrf-token"
+    ) || "";
+
+  if (
+    !safeEqual(
+      csrf,
+      result.auth.csrf
+    )
+  ) {
+    return json(
+      {
+        error:
+          "CSRF token မှားနေပါသည်"
+      },
+      403,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const body =
+    await readBody(request);
+
+  const code =
+    normalizePromoCode(body.code);
+
+  if (
+    !/^CMF-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/
+      .test(code)
+  ) {
+    return json(
+      {
+        error:
+          "Promo Code format မမှန်ပါ"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const codeHash =
+    await sha256(code);
+
+  const promo =
+    await env.DB.prepare(
+      `SELECT
+         code_hash,
+         plan_months,
+         max_redemptions,
+         redeemed_count,
+         expires_at,
+         status
+       FROM promo_codes
+       WHERE code_hash = ?
+       LIMIT 1`
+    ).bind(codeHash).first();
+
+  const now = Date.now();
+
+  if (
+    !promo ||
+    promo.status !== "active" ||
+    Number(promo.redeemed_count || 0) >=
+      Number(promo.max_redemptions || 0) ||
+    (
+      Number(promo.expires_at || 0) > 0 &&
+      Number(promo.expires_at) <= now
+    )
+  ) {
+    return json(
+      {
+        error:
+          "Promo Code မမှန်ပါ သို့မဟုတ် သက်တမ်းကုန်သွားပါပြီ"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const planMonths =
+    normalizePlanMonths(
+      promo.plan_months
+    );
+
+  if (!planMonths) {
+    return json(
+      {
+        error:
+          "Promo Plan မမှန်ပါ"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const currentVipUntil =
+    Number(
+      result.auth.user.vipUntil || 0
+    );
+
+  const baseTime =
+    Math.max(
+      now,
+      currentVipUntil
+    );
+
+  const newVipUntil =
+    baseTime +
+    vipPlanDurationMs(planMonths);
+
+  const deviceId =
+    deviceIdFromRequest(request);
+
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO promo_redemptions
+         (
+           code_hash,
+           user_id,
+           redeemed_at
+         )
+         VALUES (?, ?, ?)`
+      ).bind(
+        codeHash,
+        result.auth.user.id,
+        now
+      ),
+
+      env.DB.prepare(
+        `UPDATE users
+         SET vip_until = ?,
+             vip_plan_months = ?,
+             vip_device_id =
+               CASE
+                 WHEN ? <> ''
+                 THEN ?
+                 ELSE vip_device_id
+               END,
+             updated_at = ?
+         WHERE id = ?`
+      ).bind(
+        newVipUntil,
+        planMonths,
+        deviceId,
+        deviceId,
+        now,
+        result.auth.user.id
+      )
+    ]);
+  } catch (error) {
+    const rawMessage =
+      String(error?.message || "");
+
+    if (
+      rawMessage.includes("UNIQUE") ||
+      rawMessage.includes(
+        "PROMO_UNAVAILABLE"
+      )
+    ) {
+      return json(
+        {
+          error:
+            "ဒီ Promo Code ကို အသုံးပြုပြီးသား သို့မဟုတ် အသုံးပြု၍မရတော့ပါ"
+        },
+        409,
+        {
+          "cache-control": "no-store"
+        }
+      );
+    }
+
+    throw error;
+  }
+
+  return json(
+    {
+      ok: true,
+      message:
+        `${planMonths} Month VIP Plan ထည့်ပြီးပါပြီ။`,
+      user: {
+        id:
+          result.auth.user.id,
+        username:
+          result.auth.user.username,
+        email:
+          result.auth.user.email,
+        role:
+          result.auth.user.role,
+        vipUntil:
+          newVipUntil,
+        planMonths,
+        isVip: true,
+        vipDeviceBound:
+          Boolean(deviceId)
+      }
+    },
+    200,
+    {
+      "cache-control":
+        "no-store, max-age=0"
+    }
+  );
+}
+
+async function adminCreatePromoCode(
   request,
-  env,
-  userId
+  env
 ) {
   const result =
     await requireAdmin(
@@ -3632,68 +4079,169 @@ async function adminCancelVip(
     return result.error;
   }
 
-  const user =
-    await env.DB.prepare(
-      `SELECT
-         id,
-         username,
-         role
-       FROM users
-       WHERE id = ?
-       LIMIT 1`
+  if (
+    !rateLimit(
+      request,
+      "admin-create-promo",
+      30,
+      60 * 60 * 1000
     )
-      .bind(userId)
-      .first();
-
-  if (!user) {
-    return json(
-      {
-        error: "User မတွေ့ပါ"
-      },
-      404
-    );
-  }
-
-  if (user.role === "admin") {
+  ) {
     return json(
       {
         error:
-          "Admin account VIP ကို ပယ်ဖျက်၍မရပါ"
+          "Promo Code ထုတ်မှုများလွန်းပါသည်"
       },
-      400
+      429,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const body =
+    await readBody(request);
+
+  const planMonths =
+    normalizePlanMonths(
+      body.planMonths
+    );
+
+  if (!planMonths) {
+    return json(
+      {
+        error:
+          "Plan ကို 1, 3, 6 သို့မဟုတ် 12 months ရွေးပါ"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const maxRedemptions =
+    Number(body.maxRedemptions || 1);
+
+  if (
+    !Number.isInteger(maxRedemptions) ||
+    maxRedemptions < 1 ||
+    maxRedemptions > 1000
+  ) {
+    return json(
+      {
+        error:
+          "Max uses သည် 1 မှ 1000 အတွင်းဖြစ်ရပါမည်"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const expiresInDays =
+    Number(body.expiresInDays || 30);
+
+  if (
+    !Number.isInteger(expiresInDays) ||
+    expiresInDays < 1 ||
+    expiresInDays > 3650
+  ) {
+    return json(
+      {
+        error:
+          "Expiry days သည် 1 မှ 3650 အတွင်းဖြစ်ရပါမည်"
+      },
+      400,
+      {
+        "cache-control": "no-store"
+      }
     );
   }
 
   const now = Date.now();
 
-  /*
-   * VIP status နဲ့ VIP device binding ပဲရှင်းမယ်။
-   * sessions table ကို လုံးဝမဖျက်ပါ။
-   * ဒါကြောင့် user account auto logout မဖြစ်ပါ။
-   */
-  await env.DB.prepare(
-    `UPDATE users
-     SET vip_until = 0,
-         vip_device_id = NULL,
-         updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(
-      now,
-      userId
-    )
-    .run();
+  const expiresAt =
+    now +
+    expiresInDays * 86400000;
 
-  return json({
-    ok: true,
-    message:
-      `${user.username} ၏ VIP ကို ပယ်ဖျက်ပြီးပါပြီ။`,
-    user: {
-      id: user.id,
-      username: user.username,
-      vipUntil: 0,
-      isVip: false,
-      vipDeviceBound: false
+  /*
+   * Collision ဖြစ်နိုင်ခြေ အလွန်နည်းသော်လည်း
+   * insert မအောင်မြင်လျှင် ၅ ကြိမ်ထိ code အသစ်ပြန်ထုတ်မည်။
+   */
+  for (
+    let attempt = 0;
+    attempt < 5;
+    attempt++
+  ) {
+    const code =
+      createReadablePromoCode();
+
+    const codeHash =
+      await sha256(code);
+
+    try {
+      await env.DB.prepare(
+        `INSERT INTO promo_codes
+         (
+           code_hash,
+           code_hint,
+           plan_months,
+           max_redemptions,
+           redeemed_count,
+           expires_at,
+           status,
+           created_by,
+           created_at,
+           updated_at
+         )
+         VALUES (?, ?, ?, ?, 0, ?, 'active', ?, ?, ?)`
+      ).bind(
+        codeHash,
+        code.slice(-4),
+        planMonths,
+        maxRedemptions,
+        expiresAt,
+        result.auth.user.id,
+        now,
+        now
+      ).run();
+
+      return json(
+        {
+          ok: true,
+          code,
+          planMonths,
+          maxRedemptions,
+          expiresAt,
+          message:
+            "Promo Code ထုတ်ပြီးပါပြီ။ Code ကို အခုတစ်ကြိမ်ပဲ အပြည့်ပြပါမယ်။"
+        },
+        201,
+        {
+          "cache-control":
+            "no-store, max-age=0"
+        }
+      );
+    } catch (error) {
+      if (
+        !String(error?.message || "")
+          .includes("UNIQUE")
+      ) {
+        throw error;
+      }
     }
-  });
+  }
+
+  return json(
+    {
+      error:
+        "Promo Code ထုတ်မရပါ။ ပြန်စမ်းပါ။"
+    },
+    500,
+    {
+      "cache-control": "no-store"
+    }
+  );
 }
