@@ -3674,34 +3674,56 @@ async function adminCancelVip(
 
   const now = Date.now();
 
-  await env.DB.batch([
-    env.DB.prepare(
+  /*
+   * VIP အချက်အလက်ကိုသာ ပယ်ဖျက်မယ်။
+   *
+   * sessions table ကို မဖျက်ပါ။
+   * ဒါကြောင့် user account က login ဆက်ဝင်နေပြီး
+   * VIP access ပဲ ပျောက်သွားမယ်။
+   */
+  const updateResult =
+    await env.DB.prepare(
       `UPDATE users
        SET vip_until = 0,
            vip_plan_months = 0,
            vip_device_id = NULL,
            updated_at = ?
        WHERE id = ?`
-    ).bind(
-      now,
-      userId
-    ),
+    )
+      .bind(
+        now,
+        userId
+      )
+      .run();
 
-    /*
-     * VIP cancel ပြီးတာ app က ချက်ချင်းသိအောင်
-     * user session တွေကိုရှင်းသည်။
-     */
-    env.DB.prepare(
-      `DELETE FROM sessions
-       WHERE user_id = ?`
-    ).bind(userId)
-  ]);
+  if (
+    !updateResult.meta ||
+    updateResult.meta.changes < 1
+  ) {
+    return json(
+      {
+        error: "User မတွေ့ပါ"
+      },
+      404,
+      {
+        "cache-control":
+          "no-store, max-age=0"
+      }
+    );
+  }
 
   return json(
     {
       ok: true,
       message:
-        "VIP ပယ်ဖျက်ပြီးပါပြီ"
+        "VIP ပယ်ဖျက်ပြီးပါပြီ။ User account သည် login ဆက်ဝင်နေပါမည်။",
+      user: {
+        id: userId,
+        vipUntil: 0,
+        planMonths: 0,
+        isVip: false,
+        vipDeviceBound: false
+      }
     },
     200,
     {
@@ -3710,6 +3732,7 @@ async function adminCancelVip(
     }
   );
 }
+
 
 
 async function adminResetVipDevice(
