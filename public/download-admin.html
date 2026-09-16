@@ -85,10 +85,65 @@
     }
 
     .status-message {
-      padding: 16px;
-      text-align: center;
-      color: #b8bec9;
-    }
+  padding: 16px;
+  text-align: center;
+  color: #b8bec9;
+}
+
+/*
+ * Movie များလာရင် page တစ်ခုလုံးအရှည်ကြီး
+ * မဖြစ်စေဘဲ list အတွင်းမှာပဲ scroll လုပ်မယ်။
+ */
+#downloadList {
+  max-height: calc(100vh - 170px);
+  max-height: calc(100dvh - 170px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 6px;
+  padding-bottom: 4px;
+}
+
+#downloadList::-webkit-scrollbar {
+  width: 7px;
+}
+
+#downloadList::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 999px;
+}
+
+#downloadList::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.20);
+  border-radius: 999px;
+}
+
+#downloadList::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.34);
+}
+
+@media (max-width: 680px) {
+  body {
+    padding: 12px;
+  }
+
+  .download-admin-header {
+    align-items: flex-start;
+  }
+
+  .download-admin-header h1 {
+    margin-top: 0;
+    font-size: 24px;
+  }
+
+  #downloadList {
+    max-height: calc(100vh - 155px);
+    max-height: calc(100dvh - 155px);
+    padding-right: 3px;
+  }
+}
+
   </style>
 </head>
 
