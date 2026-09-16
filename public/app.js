@@ -1,7 +1,18 @@
 const app = document.querySelector("#app");
-const authDialog = document.querySelector("#authDialog");
-const authContent = document.querySelector("#authContent");
-const accountButton = document.querySelector("#accountButton");
+
+const authDialog =
+  document.querySelector("#authDialog");
+
+const authContent =
+  document.querySelector("#authContent");
+
+const accountButton =
+  document.querySelector("#accountButton");
+
+const adminUserToolsLink =
+  document.querySelector(
+    "#adminUserToolsLink"
+  );
 const playerDialog = document.querySelector("#playerDialog");
 const player = document.querySelector("#videoPlayer");
 const playerTitle = document.querySelector("#playerTitle");
@@ -229,26 +240,51 @@ async function api(path, options = {}) {
 
 async function initialize() {
   try {
-    const bootstrap = await api("bootstrap");
+    const bootstrap =
+      await api("bootstrap");
 
-    state.user = bootstrap.user;
-    state.csrf = bootstrap.csrf || "";
+    state.user =
+      bootstrap.user;
+
+    state.csrf =
+      bootstrap.csrf || "";
+
+    /*
+     * Admin login ဖြစ်မှသာ
+     * User / VIP Admin shortcut ကိုပြမယ်။
+     */
+    if (adminUserToolsLink) {
+      adminUserToolsLink.hidden =
+        state.user?.role !== "admin";
+    }
 
     if (
       bootstrap.maintenance &&
       state.user?.role !== "admin"
     ) {
-      renderMaintenance(bootstrap.message);
+      renderMaintenance(
+        bootstrap.message
+      );
+
       return;
     }
 
     route();
   } catch (error) {
-    console.error("Initialization error:", error);
+    console.error(
+      "Initialization error:",
+      error
+    );
+
+    if (adminUserToolsLink) {
+      adminUserToolsLink.hidden = true;
+    }
 
     app.innerHTML = `
       <section class="empty-card">
-        ${escapeHTML(error.message)}
+        ${escapeHTML(
+          error.message
+        )}
       </section>
     `;
   }
