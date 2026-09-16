@@ -2,13 +2,19 @@
 <html lang="my">
 <head>
   <meta charset="utf-8">
+
   <meta
     name="viewport"
     content="width=device-width,initial-scale=1"
   >
+
   <title>CMFLIX VIP Admin</title>
 
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       background: #080a0f;
@@ -29,8 +35,9 @@
       background: #171a22;
     }
 
-    input, button {
-      box-sizing: border-box;
+    input,
+    select,
+    button {
       min-height: 44px;
       padding: 10px 14px;
       margin: 5px;
@@ -44,6 +51,10 @@
       width: min(100%, 340px);
     }
 
+    select {
+      min-width: 145px;
+    }
+
     button {
       cursor: pointer;
     }
@@ -51,6 +62,11 @@
     .primary {
       background: #e50914;
       border-color: #e50914;
+    }
+
+    .purple {
+      background: #6d28d9;
+      border-color: #7c3aed;
     }
 
     .danger {
@@ -76,13 +92,22 @@
       align-items: center;
     }
 
-    .days {
-      width: 90px;
-    }
-
     #message {
       white-space: pre-wrap;
+      overflow-wrap: anywhere;
       color: #ffb4ab;
+    }
+
+    #generatedCode {
+      padding: 14px;
+      margin: 10px 0;
+      border: 1px dashed #8b5cf6;
+      border-radius: 12px;
+      background: #0d0b18;
+      color: #f5e8ff;
+      font-family: monospace;
+      font-size: 18px;
+      overflow-wrap: anywhere;
     }
   </style>
 </head>
@@ -122,6 +147,8 @@
       class="card"
       hidden
     >
+      <h2>User VIP</h2>
+
       <div>
         <input
           id="search"
@@ -140,6 +167,65 @@
     </section>
 
     <section
+      id="promoCard"
+      class="card"
+      hidden
+    >
+      <h2>Promo Code ထုတ်ရန်</h2>
+
+      <div class="actions">
+        <select id="promoPlan">
+          <option value="1">1 Month</option>
+          <option value="3">3 Months</option>
+          <option value="6">6 Months</option>
+          <option value="12">12 Months</option>
+        </select>
+
+        <input
+          id="promoMaxUses"
+          type="number"
+          min="1"
+          max="1000"
+          value="1"
+          placeholder="Max uses"
+        >
+
+        <input
+          id="promoExpiryDays"
+          type="number"
+          min="1"
+          max="3650"
+          value="30"
+          placeholder="Expiry days"
+        >
+
+        <button
+          id="createPromoButton"
+          class="purple"
+        >
+          Generate Promo
+        </button>
+      </div>
+
+      <div
+        id="generatedCode"
+        hidden
+      ></div>
+
+      <button
+        id="copyPromoButton"
+        hidden
+      >
+        Copy Code
+      </button>
+
+      <p class="muted">
+        Generated code အပြည့်ကို server က နောက်တစ်ကြိမ်
+        ပြန်မပေးပါ။ ထုတ်ပြီးရင် copy သိမ်းထားပါ။
+      </p>
+    </section>
+
+    <section
       id="message"
       class="card"
       hidden
@@ -148,7 +234,7 @@
 
   <script
     type="module"
-    src="/vip-admin.js?v=1"
+    src="/vip-admin.js?v=2"
   ></script>
 </body>
 </html>
