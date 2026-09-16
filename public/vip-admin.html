@@ -8,7 +8,9 @@
     content="width=device-width,initial-scale=1"
   >
 
-  <title>CMFLIX VIP Admin</title>
+  <meta name="theme-color" content="#080a0f">
+
+  <title>CMFLIX User / VIP Admin</title>
 
   <style>
     * {
@@ -19,12 +21,44 @@
       margin: 0;
       background: #080a0f;
       color: white;
-      font-family: sans-serif;
+      font-family:
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
     }
 
     main {
       width: min(900px, calc(100% - 32px));
       margin: 30px auto;
+      padding-bottom: 40px;
+    }
+
+    .page-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .page-header h1 {
+      margin: 0;
+    }
+
+    .page-header a {
+      display: inline-flex;
+      min-height: 42px;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 14px;
+      border: 1px solid #3a404c;
+      border-radius: 10px;
+      background: #222630;
+      color: white;
+      text-decoration: none;
     }
 
     .card {
@@ -45,10 +79,11 @@
       border: 1px solid #3a404c;
       background: #222630;
       color: white;
+      font: inherit;
     }
 
     input {
-      width: min(100%, 340px);
+      width: min(100%, 390px);
     }
 
     select {
@@ -57,6 +92,11 @@
 
     button {
       cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.65;
     }
 
     .primary {
@@ -69,8 +109,14 @@
       border-color: #7c3aed;
     }
 
+    .blue {
+      background: #155eaa;
+      border-color: #2574c8;
+    }
+
     .danger {
       background: #8b1118;
+      border-color: #a71923;
     }
 
     .muted {
@@ -92,6 +138,27 @@
       align-items: center;
     }
 
+    .password-field-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .reset-user-details {
+      padding: 12px 14px;
+      margin-bottom: 14px;
+      border: 1px solid #303540;
+      border-radius: 10px;
+      background: #0d1017;
+    }
+
+    .reset-user-details strong,
+    .reset-user-details span {
+      display: block;
+      overflow-wrap: anywhere;
+    }
+
     #message {
       white-space: pre-wrap;
       overflow-wrap: anywhere;
@@ -109,12 +176,41 @@
       font-size: 18px;
       overflow-wrap: anywhere;
     }
+
+    @media (max-width: 640px) {
+      main {
+        width: min(100% - 20px, 900px);
+        margin-top: 16px;
+      }
+
+      .card {
+        padding: 15px;
+      }
+
+      input,
+      select,
+      button {
+        width: 100%;
+        margin: 5px 0;
+      }
+
+      .actions,
+      .password-field-row {
+        display: block;
+      }
+    }
   </style>
 </head>
 
 <body>
   <main>
-    <h1>CMFLIX VIP Admin</h1>
+    <header class="page-header">
+      <h1>CMFLIX User / VIP Admin</h1>
+
+      <a href="/#/admin">
+        ← Movie Admin
+      </a>
+    </header>
 
     <section
       id="loginCard"
@@ -125,18 +221,22 @@
 
       <input
         id="identity"
+        type="text"
+        autocomplete="username"
         placeholder="Admin username or email"
       >
 
       <input
         id="password"
         type="password"
+        autocomplete="current-password"
         placeholder="Password"
       >
 
       <button
         id="loginButton"
         class="primary"
+        type="button"
       >
         Login
       </button>
@@ -147,23 +247,103 @@
       class="card"
       hidden
     >
-      <h2>User VIP</h2>
+      <h2>User Search</h2>
 
-      <div>
+      <p class="muted">
+        User ကိုရှာပြီး VIP ထည့်ခြင်း၊ Device Reset၊
+        Password Reset နှင့် VIP ပယ်ဖျက်ခြင်းများ
+        လုပ်နိုင်ပါသည်။
+      </p>
+
+      <div class="actions">
         <input
           id="search"
+          type="search"
+          autocomplete="off"
           placeholder="Username သို့မဟုတ် email"
         >
 
         <button
           id="searchButton"
           class="primary"
+          type="button"
         >
           Search
         </button>
       </div>
 
       <div id="results"></div>
+    </section>
+
+    <section
+      id="passwordResetCard"
+      class="card"
+      hidden
+    >
+      <h2>User Password Reset</h2>
+
+      <div
+        id="resetUserDetails"
+        class="reset-user-details"
+      ></div>
+
+      <p class="muted">
+        Password reset လုပ်ပြီးသွားလျှင် အဆိုပါ user ၏
+        login sessions အားလုံး logout ဖြစ်သွားပါမည်။
+      </p>
+
+      <div class="password-field-row">
+        <input
+          id="newUserPassword"
+          type="text"
+          minlength="8"
+          maxlength="128"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="User အတွက် password အသစ်"
+        >
+
+        <button
+          id="generatePasswordButton"
+          class="purple"
+          type="button"
+        >
+          Generate Password
+        </button>
+
+        <button
+          id="copyPasswordButton"
+          type="button"
+        >
+          Copy
+        </button>
+      </div>
+
+      <div>
+        <input
+          id="confirmAdminPassword"
+          type="password"
+          autocomplete="current-password"
+          placeholder="အတည်ပြုရန် Admin password"
+        >
+      </div>
+
+      <div class="actions">
+        <button
+          id="confirmPasswordResetButton"
+          class="danger"
+          type="button"
+        >
+          Confirm Password Reset
+        </button>
+
+        <button
+          id="cancelPasswordResetButton"
+          type="button"
+        >
+          Cancel
+        </button>
+      </div>
     </section>
 
     <section
@@ -202,6 +382,7 @@
         <button
           id="createPromoButton"
           class="purple"
+          type="button"
         >
           Generate Promo
         </button>
@@ -214,6 +395,7 @@
 
       <button
         id="copyPromoButton"
+        type="button"
         hidden
       >
         Copy Code
@@ -228,13 +410,15 @@
     <section
       id="message"
       class="card"
+      role="status"
+      aria-live="polite"
       hidden
     ></section>
   </main>
 
   <script
     type="module"
-    src="/vip-admin.js?v=2"
+    src="/vip-admin.js?v=3"
   ></script>
 </body>
 </html>
