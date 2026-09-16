@@ -1090,37 +1090,40 @@ async function login(request, env) {
     deviceId
   );
 
-  return json(
-    {
-      ok: true,
-      csrf: session.csrf,
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        vipUntil:
-          Number(user.vip_until || 0),
-        isVip,
-        vipDeviceBound:
-          Boolean(
-            isVip &&
-            (
-              user.vip_device_id ||
-              deviceId
-            )
+return json(
+  {
+    ok: true,
+    csrf: session.csrf,
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      vipUntil:
+        Number(user.vip_until || 0),
+      planMonths:
+        Number(user.vip_plan_months || 0),
+      isVip,
+      vipDeviceBound:
+        Boolean(
+          isVip &&
+          (
+            user.vip_device_id ||
+            deviceId
           )
-      }
-    },
-    200,
-    {
-      "set-cookie":
-        sessionCookie(
-          session.token,
-          session.expiresAt
         )
     }
-  );
+  },
+  200,
+  {
+    "set-cookie":
+      sessionCookie(
+        session.token,
+        session.expiresAt
+      )
+  }
+);
+
 }
 
 
