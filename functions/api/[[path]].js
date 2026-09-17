@@ -536,34 +536,54 @@ async function sha256(value) {
   return bytesToBase64Url(new Uint8Array(digest));
 }
 
-async function hashPassword(password, saltValue = null, iterations = 600000) {
+async function hashPassword(
+  password,
+  saltValue = null,
+  iterations = 100000
+) {
+  const normalizedIterations =
+    Number.isInteger(Number(iterations)) &&
+    Number(iterations) >= 100000
+      ? Number(iterations)
+      : 100000;
+
   const salt = saltValue
     ? base64UrlToBytes(saltValue)
-    : crypto.getRandomValues(new Uint8Array(16));
+    : crypto.getRandomValues(
+        new Uint8Array(16)
+      );
 
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
+  const key =
+    await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(
+        String(password || "")
+      ),
+      "PBKDF2",
+      false,
+      ["deriveBits"]
+    );
 
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      hash: "SHA-256",
-      salt,
-      iterations
-    },
-    key,
-    256
-  );
+  const bits =
+    await crypto.subtle.deriveBits(
+      {
+        name: "PBKDF2",
+        hash: "SHA-256",
+        salt,
+        iterations:
+          normalizedIterations
+      },
+      key,
+      256
+    );
 
   return {
-    hash: bytesToBase64Url(new Uint8Array(bits)),
+    hash: bytesToBase64Url(
+      new Uint8Array(bits)
+    ),
     salt: bytesToBase64Url(salt),
-    iterations
+    iterations:
+      normalizedIterations
   };
 }
 
@@ -894,10 +914,25 @@ async function register(request, env) {
   return createUser(body, env, "user");
 }
 
-async function createUser(body, env, role) {
-  const username = normalizeUsername(body.username);
-  const email = normalizeEmail(body.email);
-  const password = String(body.password || "");
+async function createUser(
+  body,
+  env,
+  role
+) {
+  const username =
+    normalizeUsername(
+      body.username
+    );
+
+  const email =
+    normalizeEmail(
+      body.email
+    );
+
+  const password =
+    String(
+      body.password || ""
+    );
 
   if (!validUsername(username)) {
     return json(
@@ -905,73 +940,235 @@ async function createUser(body, env, role) {
         error:
           "Username သည် 3–30 လုံးဖြစ်ပြီး English စာ၊ ဂဏန်း၊ _.- သာသုံးပါ"
       },
-      400
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
     );
   }
 
   if (!validEmail(email)) {
-    return json({ error: "Email format မမှန်ပါ" }, 400);
+    return json(
+      {
+        error:
+          "Email format မမှန်ပါ"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
   }
 
-  if (password.length < 8 || password.length > 128) {
-    return json({ error: "Password အနည်းဆုံး 8 လုံးထားပါ" }, 400);
+  if (
+    password.length < 8 ||
+    password.length > 128
+  ) {
+    return json(
+      {
+        error:
+          "Password ကို 8 လုံးမှ 128 လုံးအတွင်းထားပါ"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
   }
 
-  const duplicate = await env.DB.prepare(
-    "SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1"
-  ).bind(username, email).first();
+  const duplicate =
+    await env.DB.prepare(
+      `SELECT id
+       FROM users
+       WHERE username = ? COLLATE NOCASE
+          OR email = ? COLLATE NOCASE
+       LIMIT 1`
+    ).bind(
+      username,
+      email
+    ).first();
 
   if (duplicate) {
-    return json({ error: "Username သို့မဟုတ် email ရှိပြီးသားပါ" }, 409);
+    return json(
+      {
+        error:
+          "Username သို့မဟုတ် email ရှိပြီးသားပါ"
+      },
+      409,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
   }
 
-  const id = crypto.randomUUID();
-  const now = Date.now();
-  const passwordData = await hashPassword(password);
+  const id =
+    crypto.randomUUID();
 
-  await env.DB.prepare(
-    `INSERT INTO users
-     (id, username, email, password_hash, password_salt,
-      password_iterations, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
-  ).bind(
-    id,
-    username,
-    email,
-    passwordData.hash,
-    passwordData.salt,
-    passwordData.iterations,
-    role,
-    now,
-    now
-  ).run();
+  const now =
+    Date.now();
+
+  /*
+   * Register request က Cloudflare Worker CPU limit
+   * မကျော်စေရန် account အသစ်အတွက် 100,000 iterations
+   * ကို တိတိကျကျ သတ်မှတ်ထားသည်။
+   */
+  const passwordData =
+    await hashPassword(
+      password,
+      null,
+      100000
+    );
 
   const deviceId =
-    normalizeDeviceId(body.deviceId);
+    normalizeDeviceId(
+      body.deviceId
+    );
 
-  const session = await createSession(
-    env,
-    id,
-    deviceId
-  );
+  const token =
+    randomToken(32);
+
+  const tokenHash =
+    await sha256(token);
+
+  const csrf =
+    randomToken(24);
+
+  const sessionDays =
+    Math.max(
+      1,
+      Number(
+        env.SESSION_DAYS || 30
+      )
+    );
+
+  const expiresAt =
+    now +
+    sessionDays * 86400000;
+
+  try {
+    /*
+     * User insert နဲ့ session insert ကို transaction
+     * တစ်ခုတည်းအဖြစ် run မယ်။
+     *
+     * Session insert fail ရင် user insert လည်း
+     * rollback ဖြစ်သွားမယ်။
+     */
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO users
+         (
+           id,
+           username,
+           email,
+           password_hash,
+           password_salt,
+           password_iterations,
+           role,
+           status,
+           created_at,
+           updated_at
+         )
+         VALUES (
+           ?, ?, ?, ?, ?, ?,
+           ?, 'active', ?, ?
+         )`
+      ).bind(
+        id,
+        username,
+        email,
+        passwordData.hash,
+        passwordData.salt,
+        passwordData.iterations,
+        role,
+        now,
+        now
+      ),
+
+      env.DB.prepare(
+        `INSERT INTO sessions
+         (
+           token_hash,
+           user_id,
+           csrf_token,
+           device_id,
+           expires_at,
+           created_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(
+        tokenHash,
+        id,
+        csrf,
+        deviceId,
+        expiresAt,
+        now
+      )
+    ]);
+  } catch (error) {
+    const message =
+      String(
+        error?.message || ""
+      );
+
+    if (
+      /unique|constraint/i.test(
+        message
+      )
+    ) {
+      return json(
+        {
+          error:
+            "Username သို့မဟုတ် email ရှိပြီးသားပါ"
+        },
+        409,
+        {
+          "cache-control":
+            "no-store"
+        }
+      );
+    }
+
+    console.error(
+      "User registration failed",
+      {
+        name:
+          error?.name ||
+          "Error",
+        message
+      }
+    );
+
+    throw error;
+  }
 
   return json(
     {
       ok: true,
-      csrf: session.csrf,
+      csrf,
       user: {
-  id,
-  username,
-  email,
-  role,
-  vipUntil: 0,
-  isVip: false,
-  vipDeviceBound: false
-}
+        id,
+        username,
+        email,
+        role,
+        vipUntil: 0,
+        planMonths: 0,
+        isVip: false,
+        vipDeviceBound: false
+      }
     },
     201,
     {
-      "set-cookie": sessionCookie(session.token, session.expiresAt)
+      "set-cookie":
+        sessionCookie(
+          token,
+          expiresAt
+        ),
+      "cache-control":
+        "no-store"
     }
   );
 }
