@@ -388,6 +388,92 @@ function deviceIdFromRequest(request, body = null) {
 function vipActive(user, now = Date.now()) {
   return Number(user?.vip_until || 0) > now;
 }
+const TRIAL_DURATION_MS =
+  2 * 24 * 60 * 60 * 1000;
+
+function normalizePlanType(value) {
+  return value === "trial"
+    ? "trial"
+    : value === "premium"
+      ? "premium"
+      : "free";
+}
+
+function planLabel(
+  planMonths,
+  planType
+) {
+  if (planType === "trial") {
+    return "Trial";
+  }
+
+  const months =
+    Number(planMonths || 0);
+
+  if (months === 1) {
+    return "1 Month";
+  }
+
+  if (months > 1) {
+    return `${months} Months`;
+  }
+
+  return "Free Plan";
+}
+
+function calculateVipUntil(
+  currentVipUntil,
+  planMonths,
+  isTrial
+) {
+  const now = Date.now();
+
+  const startingTime =
+    Math.max(
+      now,
+      Number(currentVipUntil || 0)
+    );
+
+  if (isTrial) {
+    return startingTime +
+      TRIAL_DURATION_MS;
+  }
+
+  /*
+   * လက်ရှိ system နဲ့ကိုက်ညီအောင်
+   * တစ်လကို ရက် ၃၀ သတ်မှတ်ထားသည်။
+   */
+  return startingTime +
+    Number(planMonths) *
+      30 *
+      24 *
+      60 *
+      60 *
+      1000;
+}
+
+function randomPromoPart(
+  length = 16
+) {
+  const alphabet =
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+  const bytes =
+    crypto.getRandomValues(
+      new Uint8Array(length)
+    );
+
+  let result = "";
+
+  for (const byte of bytes) {
+    result +=
+      alphabet[
+        byte % alphabet.length
+      ];
+  }
+
+  return result;
+}
 
 async function readBody(request) {
   const contentType =
@@ -793,6 +879,7 @@ async function getAuth(request, env) {
        u.status,
        u.vip_until,
 u.vip_plan_months,
+u.vip_plan_type,
 u.vip_device_id
 
      FROM sessions AS s
@@ -816,22 +903,39 @@ u.vip_device_id
     sessionDeviceId:
       row.session_device_id || "",
     user: {
-      id: row.id,
-      username: row.username,
-      email: row.email,
-      role: row.role,
-      vipUntil:
-        Number(row.vip_until || 0),
-        planMonths:
-  Number(row.vip_plan_months || 0),
+  id: row.id,
+  username: row.username,
+  email: row.email,
+  role: row.role,
 
-      isVip:
-        Number(row.vip_until || 0) > now,
-      vipDeviceBound:
-        Boolean(row.vip_device_id),
-      vipDeviceId:
-        row.vip_device_id || ""
-    }
+  vipUntil:
+    Number(row.vip_until || 0),
+
+  planMonths:
+    Number(
+      row.vip_plan_months || 0
+    ),
+
+  planType:
+    normalizePlanType(
+      row.vip_plan_type ||
+      (
+        Number(row.vip_until || 0) > now
+          ? "premium"
+          : "free"
+      )
+    ),
+
+  isVip:
+    Number(row.vip_until || 0) > now,
+
+  vipDeviceBound:
+    Boolean(row.vip_device_id),
+
+  vipDeviceId:
+    row.vip_device_id || ""
+}
+
   };
 }
 
@@ -1345,8 +1449,22 @@ return json(
       vipUntil:
         Number(user.vip_until || 0),
       planMonths:
-        Number(user.vip_plan_months || 0),
-      isVip,
+  Number(
+    user.vip_plan_months || 0
+  ),
+
+planType:
+  normalizePlanType(
+    user.vip_plan_type ||
+    (
+      isVip
+        ? "premium"
+        : "free"
+    )
+  ),
+
+isVip,
+
       vipDeviceBound:
         Boolean(
           isVip &&
@@ -4460,29 +4578,15 @@ function createReadablePromoCode() {
   ].join("-");
 }
 
-async function redeemPromoCode(request, env) {
-  if (
-    !rateLimit(
-      request,
-      "promo-redeem",
-      10,
-      60 * 60 * 1000
-    )
-  ) {
-    return json(
-      {
-        error:
-          "Promo Code စမ်းသပ်မှုများလွန်းပါသည်။ ခဏနောက် ပြန်စမ်းပါ။"
-      },
-      429,
-      {
-        "cache-control": "no-store"
-      }
-    );
-  }
-
+async function redeemPromoCode(
+  request,
+  env
+) {
   const result =
-    await requireAuth(request, env);
+    await requireAuth(
+      request,
+      env
+    );
 
   if (result.error) {
     return result.error;
@@ -4524,20 +4628,45 @@ async function redeemPromoCode(request, env) {
     );
   }
 
-  const body =
-    await readBody(request);
-
-  const code =
-    normalizePromoCode(body.code);
-
   if (
-    !/^CMF-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/
-      .test(code)
+    !rateLimit(
+      request,
+      `promo-redeem:${
+        result.auth.user.id
+      }`,
+      10,
+      10 * 60 * 1000
+    )
   ) {
     return json(
       {
         error:
-          "Promo Code format မမှန်ပါ"
+          "Promo Code စမ်းသပ်မှုများလွန်းပါသည်။ ခဏနောက်ပြန်စမ်းပါ။"
+      },
+      429,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const body =
+    await readBody(request);
+
+  const code =
+    String(body.code || "")
+      .trim()
+      .toUpperCase();
+
+  if (
+    !/^CMFLIX-[A-Z0-9]{8,32}$/.test(
+      code
+    )
+  ) {
+    return json(
+      {
+        error:
+          "Promo Code format မမှန်ပါ။"
       },
       400,
       {
@@ -4549,11 +4678,14 @@ async function redeemPromoCode(request, env) {
   const codeHash =
     await sha256(code);
 
+  const now = Date.now();
+
   const promo =
     await env.DB.prepare(
       `SELECT
          code_hash,
          plan_months,
+         is_trial,
          max_redemptions,
          redeemed_count,
          expires_at,
@@ -4561,26 +4693,118 @@ async function redeemPromoCode(request, env) {
        FROM promo_codes
        WHERE code_hash = ?
        LIMIT 1`
-    ).bind(codeHash).first();
+    ).bind(
+      codeHash
+    ).first();
 
-  const now = Date.now();
+  if (!promo) {
+    return json(
+      {
+        error:
+          "Promo Code မမှန်ပါ။"
+      },
+      404,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
 
   if (
-    !promo ||
-    promo.status !== "active" ||
-    Number(promo.redeemed_count || 0) >=
-      Number(promo.max_redemptions || 0) ||
-    (
-      Number(promo.expires_at || 0) > 0 &&
-      Number(promo.expires_at) <= now
-    )
+    promo.status !== "active"
   ) {
     return json(
       {
         error:
-          "Promo Code မမှန်ပါ သို့မဟုတ် သက်တမ်းကုန်သွားပါပြီ"
+          "ဤ Promo Code ကို ပိတ်ထားပါသည်။"
       },
-      400,
+      409,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  if (
+    Number(promo.expires_at || 0) > 0 &&
+    Number(promo.expires_at) <= now
+  ) {
+    return json(
+      {
+        error:
+          "ဤ Promo Code သက်တမ်းကုန်သွားပါပြီ။"
+      },
+      409,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  if (
+    Number(promo.redeemed_count || 0) >=
+    Number(promo.max_redemptions || 0)
+  ) {
+    return json(
+      {
+        error:
+          "ဤ Promo Code အသုံးပြုနိုင်သည့်အရေအတွက် ပြည့်သွားပါပြီ။"
+      },
+      409,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const user =
+    await env.DB.prepare(
+      `SELECT
+         id,
+         username,
+         email,
+         role,
+         vip_until,
+         vip_plan_months,
+         vip_plan_type,
+         vip_device_id
+       FROM users
+       WHERE id = ?
+         AND status = 'active'
+       LIMIT 1`
+    ).bind(
+      result.auth.user.id
+    ).first();
+
+  if (!user) {
+    return json(
+      {
+        error:
+          "User account မတွေ့ပါ။"
+      },
+      404,
+      {
+        "cache-control": "no-store"
+      }
+    );
+  }
+
+  const isTrial =
+    Number(promo.is_trial || 0) === 1;
+
+  /*
+   * Active Premium ရှိသူကို Trial ထပ်တိုးခွင့်မပေးပါ။
+   */
+  if (
+    isTrial &&
+    Number(user.vip_until || 0) > now
+  ) {
+    return json(
+      {
+        error:
+          "Active Premium ရှိပြီးသား account တွင် Trial Code အသုံးပြု၍မရပါ။"
+      },
+      409,
       {
         "cache-control": "no-store"
       }
@@ -4588,42 +4812,37 @@ async function redeemPromoCode(request, env) {
   }
 
   const planMonths =
-    normalizePlanMonths(
-      promo.plan_months
-    );
-
-  if (!planMonths) {
-    return json(
-      {
-        error:
-          "Promo Plan မမှန်ပါ"
-      },
-      400,
-      {
-        "cache-control": "no-store"
-      }
-    );
-  }
-
-  const currentVipUntil =
-    Number(
-      result.auth.user.vipUntil || 0
-    );
-
-  const baseTime =
-    Math.max(
-      now,
-      currentVipUntil
-    );
+    Number(promo.plan_months || 0);
 
   const newVipUntil =
-    baseTime +
-    vipPlanDurationMs(planMonths);
+    calculateVipUntil(
+      user.vip_until,
+      planMonths,
+      isTrial
+    );
 
-  const deviceId =
-    deviceIdFromRequest(request);
+  const newPlanMonths =
+    isTrial
+      ? 0
+      : planMonths;
+
+  const newPlanType =
+    isTrial
+      ? "trial"
+      : "premium";
+
+  const sessionDeviceId =
+    result.auth.sessionDeviceId ||
+    "";
 
   try {
+    /*
+     * promo redemption insert နဲ့ user VIP update
+     * ကို batch တစ်ခုတည်းနဲ့လုပ်မယ်။
+     *
+     * Existing trigger က max_redemptions နဲ့
+     * redeemed_count ကို atomic စစ်ပေးပါတယ်။
+     */
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO promo_redemptions
@@ -4635,7 +4854,7 @@ async function redeemPromoCode(request, env) {
          VALUES (?, ?, ?)`
       ).bind(
         codeHash,
-        result.auth.user.id,
+        user.id,
         now
       ),
 
@@ -4643,6 +4862,7 @@ async function redeemPromoCode(request, env) {
         `UPDATE users
          SET vip_until = ?,
              vip_plan_months = ?,
+             vip_plan_type = ?,
              vip_device_id =
                CASE
                  WHEN ? <> ''
@@ -4653,27 +4873,46 @@ async function redeemPromoCode(request, env) {
          WHERE id = ?`
       ).bind(
         newVipUntil,
-        planMonths,
-        deviceId,
-        deviceId,
+        newPlanMonths,
+        newPlanType,
+        sessionDeviceId,
+        sessionDeviceId,
         now,
-        result.auth.user.id
+        user.id
       )
     ]);
   } catch (error) {
-    const rawMessage =
-      String(error?.message || "");
+    const errorMessage =
+      String(
+        error?.message || ""
+      );
 
     if (
-      rawMessage.includes("UNIQUE") ||
-      rawMessage.includes(
+      /unique|constraint/i.test(
+        errorMessage
+      )
+    ) {
+      return json(
+        {
+          error:
+            "ဤ Promo Code ကို သင့် account ဖြင့် အသုံးပြုပြီးသားဖြစ်ပါသည်။"
+        },
+        409,
+        {
+          "cache-control": "no-store"
+        }
+      );
+    }
+
+    if (
+      errorMessage.includes(
         "PROMO_UNAVAILABLE"
       )
     ) {
       return json(
         {
           error:
-            "ဒီ Promo Code ကို အသုံးပြုပြီးသား သို့မဟုတ် အသုံးပြု၍မရတော့ပါ"
+            "Promo Code သက်တမ်းကုန်ခြင်း သို့မဟုတ် အသုံးပြုခွင့်ပြည့်သွားခြင်း ဖြစ်နိုင်ပါသည်။"
         },
         409,
         {
@@ -4688,23 +4927,34 @@ async function redeemPromoCode(request, env) {
   return json(
     {
       ok: true,
+
       message:
-        `${planMonths} Month VIP Plan ထည့်ပြီးပါပြီ။`,
+        isTrial
+          ? "၂ ရက်စာ Trial စတင်အသုံးပြုနိုင်ပါပြီ။"
+          : "Promo Code အသုံးပြုပြီးပါပြီ။",
+
       user: {
-        id:
-          result.auth.user.id,
-        username:
-          result.auth.user.username,
-        email:
-          result.auth.user.email,
-        role:
-          result.auth.user.role,
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+
         vipUntil:
           newVipUntil,
-        planMonths,
+
+        planMonths:
+          newPlanMonths,
+
+        planType:
+          newPlanType,
+
         isVip: true,
+
         vipDeviceBound:
-          Boolean(deviceId)
+          Boolean(
+            user.vip_device_id ||
+            sessionDeviceId
+          )
       }
     },
     200,
@@ -4714,6 +4964,7 @@ async function redeemPromoCode(request, env) {
     }
   );
 }
+
 
 async function adminCreatePromoCode(
   request,
@@ -4733,15 +4984,17 @@ async function adminCreatePromoCode(
   if (
     !rateLimit(
       request,
-      "admin-create-promo",
-      30,
+      `admin-promo-create:${
+        result.auth.user.id
+      }`,
+      100,
       60 * 60 * 1000
     )
   ) {
     return json(
       {
         error:
-          "Promo Code ထုတ်မှုများလွန်းပါသည်"
+          "Promo Code ထုတ်ယူမှုများလွန်းပါသည်။ ခဏနောက်ပြန်စမ်းပါ။"
       },
       429,
       {
@@ -4753,16 +5006,40 @@ async function adminCreatePromoCode(
   const body =
     await readBody(request);
 
-  const planMonths =
-    normalizePlanMonths(
-      body.planMonths
+  const requestedPlanType =
+    normalizePlanType(
+      body.planType
     );
 
-  if (!planMonths) {
+  const isTrial =
+    requestedPlanType === "trial";
+
+  /*
+   * Trial ဖြစ်ရင် database CHECK constraint
+   * နဲ့ကိုက်ညီစေရန် plan_months ကို 1 သိမ်းမယ်။
+   * အမှန်တကယ် duration ကို is_trial က ဆုံးဖြတ်မယ်။
+   */
+  const planMonths =
+    isTrial
+      ? 1
+      : Number(body.planMonths);
+
+  const maxRedemptions =
+    Number(body.maxRedemptions);
+
+  const expiresInDays =
+    Number(body.expiresInDays);
+
+  if (
+    !isTrial &&
+    ![1, 3, 6, 12].includes(
+      planMonths
+    )
+  ) {
     return json(
       {
         error:
-          "Plan ကို 1, 3, 6 သို့မဟုတ် 12 months ရွေးပါ"
+          "Promo plan မမှန်ပါ။"
       },
       400,
       {
@@ -4771,18 +5048,17 @@ async function adminCreatePromoCode(
     );
   }
 
-  const maxRedemptions =
-    Number(body.maxRedemptions || 1);
-
   if (
-    !Number.isInteger(maxRedemptions) ||
+    !Number.isInteger(
+      maxRedemptions
+    ) ||
     maxRedemptions < 1 ||
     maxRedemptions > 1000
   ) {
     return json(
       {
         error:
-          "Max uses သည် 1 မှ 1000 အတွင်းဖြစ်ရပါမည်"
+          "Max uses ကို 1 မှ 1000 အတွင်းထားပါ။"
       },
       400,
       {
@@ -4791,18 +5067,17 @@ async function adminCreatePromoCode(
     );
   }
 
-  const expiresInDays =
-    Number(body.expiresInDays || 30);
-
   if (
-    !Number.isInteger(expiresInDays) ||
+    !Number.isInteger(
+      expiresInDays
+    ) ||
     expiresInDays < 1 ||
     expiresInDays > 3650
   ) {
     return json(
       {
         error:
-          "Expiry days သည် 1 မှ 3650 အတွင်းဖြစ်ရပါမည်"
+          "Expiry days ကို 1 မှ 3650 အတွင်းထားပါ။"
       },
       400,
       {
@@ -4815,84 +5090,87 @@ async function adminCreatePromoCode(
 
   const expiresAt =
     now +
-    expiresInDays * 86400000;
+    expiresInDays *
+      24 *
+      60 *
+      60 *
+      1000;
 
-  /*
-   * Collision ဖြစ်နိုင်ခြေ အလွန်နည်းသော်လည်း
-   * insert မအောင်မြင်လျှင် ၅ ကြိမ်ထိ code အသစ်ပြန်ထုတ်မည်။
-   */
-  for (
-    let attempt = 0;
-    attempt < 5;
-    attempt++
-  ) {
-    const code =
-      createReadablePromoCode();
+  const code =
+    `CMFLIX-${randomPromoPart(16)}`;
 
-    const codeHash =
-      await sha256(code);
+  const codeHash =
+    await sha256(code);
 
-    try {
-      await env.DB.prepare(
-        `INSERT INTO promo_codes
-         (
-           code_hash,
-           code_hint,
-           plan_months,
-           max_redemptions,
-           redeemed_count,
-           expires_at,
-           status,
-           created_by,
-           created_at,
-           updated_at
-         )
-         VALUES (?, ?, ?, ?, 0, ?, 'active', ?, ?, ?)`
-      ).bind(
-        codeHash,
-        code.slice(-4),
-        planMonths,
-        maxRedemptions,
-        expiresAt,
-        result.auth.user.id,
-        now,
-        now
-      ).run();
+  const codeHint =
+    `${code.slice(0, 10)}…${
+      code.slice(-4)
+    }`;
 
-      return json(
-        {
-          ok: true,
-          code,
-          planMonths,
-          maxRedemptions,
-          expiresAt,
-          message:
-            "Promo Code ထုတ်ပြီးပါပြီ။ Code ကို အခုတစ်ကြိမ်ပဲ အပြည့်ပြပါမယ်။"
-        },
-        201,
-        {
-          "cache-control":
-            "no-store, max-age=0"
-        }
-      );
-    } catch (error) {
-      if (
-        !String(error?.message || "")
-          .includes("UNIQUE")
-      ) {
-        throw error;
-      }
-    }
-  }
+  await env.DB.prepare(
+    `INSERT INTO promo_codes
+     (
+       code_hash,
+       code_hint,
+       plan_months,
+       is_trial,
+       max_redemptions,
+       redeemed_count,
+       expires_at,
+       status,
+       created_by,
+       created_at,
+       updated_at
+     )
+     VALUES (
+       ?, ?, ?, ?, ?,
+       0, ?, 'active',
+       ?, ?, ?
+     )`
+  ).bind(
+    codeHash,
+    codeHint,
+    planMonths,
+    isTrial ? 1 : 0,
+    maxRedemptions,
+    expiresAt,
+    result.auth.user.id,
+    now,
+    now
+  ).run();
 
   return json(
     {
-      error:
-        "Promo Code ထုတ်မရပါ။ ပြန်စမ်းပါ။"
+      ok: true,
+      message:
+        isTrial
+          ? "၂ ရက်စာ Trial Promo Code ထုတ်ပြီးပါပြီ။"
+          : "Promo Code ထုတ်ပြီးပါပြီ။",
+
+      code,
+
+      planType:
+        isTrial
+          ? "trial"
+          : "premium",
+
+      planMonths:
+        isTrial
+          ? 0
+          : planMonths,
+
+      durationDays:
+        isTrial
+          ? 2
+          : planMonths * 30,
+
+      maxRedemptions,
+      expiresAt
     },
-    500,
+    201,
     {
-      "cache-control": "no-store"
+      "cache-control":
+        "no-store, max-age=0"
     }
   );
 }
