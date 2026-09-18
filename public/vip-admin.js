@@ -82,7 +82,14 @@ function escapeHTML(value) {
     .replaceAll("'", "&#039;");
 }
 
-function planLabel(months) {
+function planLabel(
+  months,
+  planType = "premium"
+) {
+  if (planType === "trial") {
+    return "Trial (2 Days)";
+  }
+
   const value =
     Number(months || 0);
 
@@ -96,6 +103,7 @@ function planLabel(months) {
 
   return "Free Plan";
 }
+
 
 function generateResetPassword(
   length = 16
@@ -561,8 +569,10 @@ function renderUsers(users) {
                 user.isVip
                   ? escapeHTML(
                       planLabel(
-                        user.planMonths
-                      )
+  user.planMonths,
+  user.planType
+)
+
                     )
                   : "Free Plan"
               }
@@ -979,14 +989,25 @@ async function createPromoCode() {
   try {
     clearMessage();
 
+    const selectedPlan =
+      document
+        .querySelector(
+          "#promoPlan"
+        )
+        .value;
+
+    const isTrial =
+      selectedPlan === "trial";
+
     const planMonths =
-      Number(
-        document
-          .querySelector(
-            "#promoPlan"
-          )
-          .value
-      );
+      isTrial
+        ? 1
+        : Number(selectedPlan);
+
+    const planType =
+      isTrial
+        ? "trial"
+        : "premium";
 
     const maxRedemptions =
       Number(
@@ -1007,12 +1028,13 @@ async function createPromoCode() {
       );
 
     if (
+      !isTrial &&
       ![1, 3, 6, 12].includes(
         planMonths
       )
     ) {
       throw new Error(
-        "Promo plan မမှန်ပါ"
+        "Promo plan မမှန်ပါ။"
       );
     }
 
@@ -1024,7 +1046,7 @@ async function createPromoCode() {
       maxRedemptions > 1000
     ) {
       throw new Error(
-        "Max uses ကို 1 မှ 1000 အတွင်းထားပါ"
+        "Max uses ကို 1 မှ 1000 အတွင်းထားပါ။"
       );
     }
 
@@ -1036,11 +1058,12 @@ async function createPromoCode() {
       expiresInDays > 3650
     ) {
       throw new Error(
-        "Expiry days ကို 1 မှ 3650 အတွင်းထားပါ"
+        "Expiry days ကို 1 မှ 3650 အတွင်းထားပါ။"
       );
     }
 
     createButton.disabled = true;
+
     createButton.textContent =
       "Generating…";
 
@@ -1049,7 +1072,9 @@ async function createPromoCode() {
         "admin/promo-codes",
         {
           method: "POST",
+
           body: JSON.stringify({
+            planType,
             planMonths,
             maxRedemptions,
             expiresInDays
@@ -1061,6 +1086,7 @@ async function createPromoCode() {
       data.code || "";
 
     generatedCode.hidden = false;
+
     generatedCode.textContent =
       currentPromoCode;
 
@@ -1068,14 +1094,18 @@ async function createPromoCode() {
       !currentPromoCode;
 
     showMessage(
-      `${data.message || "Promo Code ထုတ်ပြီးပါပြီ"}\n` +
+      `${
+        data.message ||
+        "Promo Code ထုတ်ပြီးပါပြီ။"
+      }\n` +
       `Plan: ${planLabel(
-        data.planMonths
+        data.planMonths,
+        data.planType
       )}\n` +
       `Max uses: ${
         data.maxRedemptions
       }\n` +
-      `Expired: ${
+      `Code expiry: ${
         new Date(
           data.expiresAt
         ).toLocaleString()
@@ -1088,9 +1118,11 @@ async function createPromoCode() {
     );
   } finally {
     createButton.disabled = false;
+
     createButton.textContent =
       "Generate Promo";
   }
 }
+
 
 initialize();
