@@ -452,28 +452,6 @@ function calculateVipUntil(
       1000;
 }
 
-function randomPromoPart(
-  length = 16
-) {
-  const alphabet =
-    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-  const bytes =
-    crypto.getRandomValues(
-      new Uint8Array(length)
-    );
-
-  let result = "";
-
-  for (const byte of bytes) {
-    result +=
-      alphabet[
-        byte % alphabet.length
-      ];
-  }
-
-  return result;
-}
 
 async function readBody(request) {
   const contentType =
