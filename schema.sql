@@ -12,7 +12,10 @@ CREATE TABLE IF NOT EXISTS users (
   status TEXT NOT NULL DEFAULT 'active'
     CHECK(status IN ('active', 'blocked')),
   vip_until INTEGER NOT NULL DEFAULT 0,
-  vip_device_id TEXT DEFAULT NULL,
+vip_plan_months INTEGER NOT NULL DEFAULT 0,
+vip_plan_type TEXT NOT NULL DEFAULT 'free',
+vip_device_id TEXT DEFAULT NULL,
+
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
