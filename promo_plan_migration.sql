@@ -7,8 +7,11 @@ CREATE TABLE IF NOT EXISTS promo_codes (
   code_hash TEXT PRIMARY KEY,
   code_hint TEXT NOT NULL DEFAULT '',
   plan_months INTEGER NOT NULL
-    CHECK(plan_months IN (1, 3, 6, 12)),
-  max_redemptions INTEGER NOT NULL DEFAULT 1
+  CHECK(plan_months IN (1, 3, 6, 12)),
+is_trial INTEGER NOT NULL DEFAULT 0
+  CHECK(is_trial IN (0, 1)),
+max_redemptions INTEGER NOT NULL DEFAULT 1
+
     CHECK(max_redemptions >= 1),
   redeemed_count INTEGER NOT NULL DEFAULT 0
     CHECK(redeemed_count >= 0),
