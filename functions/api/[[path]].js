@@ -4229,7 +4229,9 @@ async function adminSearchVipUsers(
          status,
          vip_until,
          vip_plan_months,
-         vip_device_id
+vip_plan_type,
+vip_device_id
+
        FROM users
        WHERE username LIKE ? COLLATE NOCASE
           OR email LIKE ? COLLATE NOCASE
@@ -4258,6 +4260,16 @@ async function adminSearchVipUsers(
               Number(
                 user.vip_plan_months || 0
               ),
+              planType:
+  normalizePlanType(
+    user.vip_plan_type ||
+    (
+      Number(user.vip_until || 0) > Date.now()
+        ? "premium"
+        : "free"
+    )
+  ),
+
             isVip:
               Number(user.vip_until || 0)
                 > now,
@@ -4349,10 +4361,12 @@ async function adminExtendVip(
 
   await env.DB.prepare(
     `UPDATE users
-     SET vip_until = ?,
-         vip_plan_months = ?,
-         updated_at = ?
-     WHERE id = ?`
+SET vip_until = ?,
+    vip_plan_months = ?,
+    vip_plan_type = 'premium',
+    updated_at = ?
+WHERE id = ?
+`
   ).bind(
     newVipUntil,
     planMonths,
@@ -4405,11 +4419,13 @@ async function adminCancelVip(
   const updateResult =
     await env.DB.prepare(
       `UPDATE users
-       SET vip_until = 0,
-           vip_plan_months = 0,
-           vip_device_id = NULL,
-           updated_at = ?
-       WHERE id = ?`
+SET vip_until = 0,
+    vip_plan_months = 0,
+    vip_plan_type = 'free',
+    vip_device_id = NULL,
+    updated_at = ?
+WHERE id = ?
+`
     )
       .bind(
         now,
