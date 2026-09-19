@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="my">
+<head>
+  <meta charset="utf-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  >
+
+  <meta name="theme-color" content="#080a0f">
+
+  <title>CMFLIX App Content Admin</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #080a0f;
+      color: #fff;
+      font-family:
+        system-ui,
+        -apple-system,
+        "Segoe UI",
+        sans-serif;
+    }
+
+    main {
+      width: min(850px, calc(100% - 28px));
+      margin: 24px auto 50px;
+    }
+
+    .header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .back {
+      padding: 10px 14px;
+      border: 1px solid #3a404c;
+      border-radius: 10px;
+      background: #222630;
+      color: #fff;
+      text-decoration: none;
+    }
+
+    .card {
+      padding: 20px;
+      margin-bottom: 16px;
+      border: 1px solid #303540;
+      border-radius: 16px;
+      background: #171a22;
+    }
+
+    .card h2 {
+      margin-top: 0;
+    }
+
+    label {
+      display: block;
+      margin: 15px 0 6px;
+      color: #d6d9e0;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    input,
+    textarea,
+    button {
+      width: 100%;
+      min-height: 44px;
+      padding: 11px 13px;
+      border: 1px solid #3a404c;
+      border-radius: 10px;
+      background: #222630;
+      color: #fff;
+      font: inherit;
+    }
+
+    textarea {
+      min-height: 130px;
+      resize: vertical;
+    }
+
+    input[type="checkbox"] {
+      width: 22px;
+      min-height: 22px;
+      margin: 0;
+    }
+
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 10px 0 18px;
+    }
+
+    .check-row label {
+      margin: 0;
+    }
+
+    .two-columns {
+      display: grid;
+      grid-template-columns:
+        repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    button {
+      cursor: pointer;
+      margin-top: 10px;
+      background: #e50914;
+      border-color: #e50914;
+      font-weight: 800;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+
+    .secondary {
+      background: #6d28d9;
+      border-color: #7c3aed;
+    }
+
+    .muted {
+      color: #a8adb8;
+      line-height: 1.6;
+    }
+
+    #bannerPreview {
+      display: none;
+      width: 100%;
+      max-height: 230px;
+      margin-top: 14px;
+      border: 1px solid #3a404c;
+      border-radius: 13px;
+      object-fit: contain;
+      background: #090b10;
+    }
+
+    #message {
+      display: none;
+      padding: 15px;
+      margin-bottom: 16px;
+      border: 1px solid #303540;
+      border-radius: 12px;
+      background: #171a22;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    #loginCard,
+    #contentForm {
+      display: none;
+    }
+
+    @media (max-width: 640px) {
+      .two-columns {
+        grid-template-columns: 1fr;
+        gap: 0;
+      }
+
+      .card {
+        padding: 15px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <header class="header">
+      <h1>App Banner / Notification</h1>
+
+      <a
+        class="back"
+        href="/vip-admin.html"
+      >
+        ← VIP Admin
+      </a>
+    </header>
+
+    <div
+      id="message"
+      role="status"
+      aria-live="polite"
+    ></div>
+
+    <section
+      id="loginCard"
+      class="card"
+    >
+      <h2>Admin Login</h2>
+
+      <label for="identity">
+        Username / Email
+      </label>
+
+      <input
+        id="identity"
+        type="text"
+        autocomplete="username"
+      >
+
+      <label for="password">
+        Password
+      </label>
+
+      <input
+        id="password"
+        type="password"
+        autocomplete="current-password"
+      >
+
+      <button
+        id="loginButton"
+        type="button"
+      >
+        Login
+      </button>
+    </section>
+
+    <form id="contentForm">
+      <section class="card">
+        <h2>Premium Banner</h2>
+
+        <div class="check-row">
+          <input
+            id="bannerEnabled"
+            type="checkbox"
+          >
+
+          <label for="bannerEnabled">
+            App ထဲတွင် banner ပြမည်
+          </label>
+        </div>
+
+        <label for="bannerUrl">
+          Banner image URL
+        </label>
+
+        <input
+          id="bannerUrl"
+          type="url"
+          maxlength="2000"
+          placeholder="https://example.com/banner.jpg"
+        >
+
+        <label for="bannerLink">
+          Banner နှိပ်လျှင်သွားမည့် link
+        </label>
+
+        <input
+          id="bannerLink"
+          type="url"
+          maxlength="2000"
+          placeholder="https://t.me/iqowoq"
+        >
+
+        <label for="bannerVersion">
+          Banner version
+        </label>
+
+        <input
+          id="bannerVersion"
+          type="text"
+          maxlength="100"
+          placeholder="ဥပမာ 2026-09-banner-1"
+        >
+
+        <p class="muted">
+          ပုံ URL တူပေမယ့် ပုံအစားထိုးလိုက်ရင် version ကို
+          ပြောင်းပေးပါ။ App က version အသစ်တွေ့မှ image
+          အသစ်ကို download လုပ်ပါမယ်။
+        </p>
+
+        <button
+          id="previewButton"
+          class="secondary"
+          type="button"
+        >
+          Banner Preview
+        </button>
+
+        <img
+          id="bannerPreview"
+          alt="Banner preview"
+        >
+      </section>
+
+      <section class="card">
+        <h2>App Notification</h2>
+
+        <div class="check-row">
+          <input
+            id="noticeEnabled"
+            type="checkbox"
+          >
+
+          <label for="noticeEnabled">
+            Notification ဖွင့်မည်
+          </label>
+        </div>
+
+        <label for="noticeId">
+          Notification ID
+        </label>
+
+        <input
+          id="noticeId"
+          type="text"
+          maxlength="100"
+          placeholder="ဥပမာ maintenance-01"
+        >
+
+        <p class="muted">
+          စာအသစ်ပြောင်းတိုင်း Notification ID ကိုပါ
+          ပြောင်းပေးသင့်ပါတယ်။
+        </p>
+
+        <label for="noticeTitle">
+          ခေါင်းစဉ်
+        </label>
+
+        <input
+          id="noticeTitle"
+          type="text"
+          maxlength="100"
+          placeholder="အသိပေးချက်"
+        >
+
+        <label for="noticeMessage">
+          Notification စာ
+        </label>
+
+        <textarea
+          id="noticeMessage"
+          maxlength="1500"
+          placeholder="Admin ပြောချင်သောစာ..."
+        ></textarea>
+
+        <div class="two-columns">
+          <div>
+            <label for="noticeStart">
+              စပြမည့်နေ့/အချိန်
+            </label>
+
+            <input
+              id="noticeStart"
+              type="datetime-local"
+            >
+          </div>
+
+          <div>
+            <label for="noticeEnd">
+              ရပ်မည့်နေ့/အချိန်
+            </label>
+
+            <input
+              id="noticeEnd"
+              type="datetime-local"
+            >
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <button
+          id="saveButton"
+          type="submit"
+        >
+          Save App Settings
+        </button>
+      </section>
+    </form>
+  </main>
+
+  <script
+    type="module"
+    src="/app-content-admin.js?v=1"
+  ></script>
+</body>
+</html>
