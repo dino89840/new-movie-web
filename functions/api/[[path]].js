@@ -63,16 +63,33 @@ export async function onRequest(context) {
 }
 
 /*
- * Android app banner / announcement configuration.
+ * Rarely-changing banner/app content.
  *
- * App ထဲတွင် local cache သုံးမည်ဖြစ်ပြီး server/CDN
- * ဘက်တွင်လည်း cache headers ထည့်ပေးထားသည်။
+ * Cloudflare Cache API ကိုအသုံးပြုပြီး D1 origin
+ * request များကိုလျှော့ချမည်။
  */
 if (
   path === "app-content" &&
   method === "GET"
 ) {
   return getPublicAppContent(
+    request,
+    env,
+    context
+  );
+}
+
+/*
+ * Frequently validated notification.
+ *
+ * CDN cache မသုံးဘဲ If-None-Match / ETag ဖြင့်
+ * changed ဖြစ်မှ JSON body ပြန်ပေးမည်။
+ */
+if (
+  path === "app-notification" &&
+  method === "GET"
+) {
+  return getPublicAppNotification(
     request,
     env
   );
@@ -270,7 +287,8 @@ if (
 ) {
   return adminUpdateAppContent(
     request,
-    env
+    env,
+    context
   );
 }
 
@@ -5375,10 +5393,114 @@ function validOptionalHttpsURL(value) {
   }
 }
 
+const APP_CONTENT_EDGE_TTL_SECONDS =
+  6 * 60 * 60;
+
+function appContentCacheKey(
+  request
+) {
+  const url =
+    new URL(request.url);
+
+  /*
+   * Query parameters များကြောင့် cache key
+   * အများကြီးမဖြစ်စေရန် canonical URL သုံးမည်။
+   */
+  url.pathname =
+    "/api/app-content";
+
+  url.search = "";
+  url.hash = "";
+
+  return new Request(
+    url.toString(),
+    {
+      method: "GET"
+    }
+  );
+}
+
+function requestETagMatches(
+  request,
+  etag
+) {
+  const value =
+    request.headers.get(
+      "if-none-match"
+    );
+
+  if (!value) {
+    return false;
+  }
+
+  return value
+    .split(",")
+    .map(item => item.trim())
+    .some(item =>
+      item === "*" ||
+      item === etag
+    );
+}
+
+function notModifiedResponse(
+  headers
+) {
+  return new Response(
+    null,
+    {
+      status: 304,
+      headers: new Headers(headers)
+    }
+  );
+}
+
 async function getPublicAppContent(
   request,
-  env
+  env,
+  context
 ) {
+  const cache =
+    caches.default;
+
+  const cacheKey =
+    appContentCacheKey(request);
+
+  /*
+   * Cache hit ဖြစ်လျှင် D1 ကိုလုံးဝမဖတ်ဘဲ
+   * cached response ကိုပြန်ပေးမည်။
+   */
+  const cachedResponse =
+    await cache.match(cacheKey);
+
+  if (cachedResponse) {
+    const cachedETag =
+      cachedResponse.headers.get(
+        "etag"
+      ) || "";
+
+    /*
+     * APK version အဟောင်းများက /app-content ကို
+     * If-None-Match နဲ့ခေါ်နေသေးနိုင်လို့
+     * cached response အပေါ်မှာလည်း 304 support ထားမည်။
+     */
+    if (
+      cachedETag &&
+      requestETagMatches(
+        request,
+        cachedETag
+      )
+    ) {
+      return notModifiedResponse(
+        cachedResponse.headers
+      );
+    }
+
+    return cachedResponse;
+  }
+
+  /*
+   * CDN/Cache API miss ဖြစ်မှ D1 ဖတ်မည်။
+   */
   const data =
     await readAppContentSettings(env);
 
@@ -5388,56 +5510,117 @@ async function getPublicAppContent(
       data.newestUpdatedAt
     );
 
-  /*
-   * DB update time ကို ETag အဖြစ်သုံးထားသည်။
-   *
-   * Config မပြောင်းရင် Android app က
-   * If-None-Match ပို့ပြီး 304 response ပဲရမယ်။
-   * JSON body အပြည့် ထပ် download လုပ်ရန်မလိုပါ။
-   */
   const etag =
     `W/"app-content-${data.newestUpdatedAt}"`;
 
-  const requestETag =
-    request.headers.get(
-      "if-none-match"
+  const response =
+    json(
+      payload,
+      200,
+      {
+        "etag": etag,
+
+        /*
+         * Browser/device cache သည် 5 minutes။
+         * Cloudflare shared edge cache သည် 6 hours။
+         *
+         * stale-while-revalidate မထည့်ထားတာက
+         * TTL ကျော်ပြီးနောက် banner အဟောင်းကို
+         * ထပ်မံအသုံးမပြုစေရန်ဖြစ်သည်။
+         */
+        "cache-control":
+          `public, max-age=300, s-maxage=${APP_CONTENT_EDGE_TTL_SECONDS}`,
+
+        "x-content-type-options":
+          "nosniff"
+      }
     );
 
-  const cacheHeaders = {
+  /*
+   * User response ကိုစောင့်မထားဘဲ cache ထဲ
+   * background write လုပ်မည်။
+   */
+  context.waitUntil(
+    cache.put(
+      cacheKey,
+      response.clone()
+    )
+  );
+
+  if (
+    requestETagMatches(
+      request,
+      etag
+    )
+  ) {
+    return notModifiedResponse(
+      response.headers
+    );
+  }
+
+  return response;
+}
+
+async function getPublicAppNotification(
+  request,
+  env
+) {
+  /*
+   * Notification endpoint ကို edge cache မလုပ်ပါ။
+   * Request တိုင်း current D1 state နဲ့ validate
+   * လုပ်မည်။
+   */
+  const data =
+    await readAppContentSettings(env);
+
+  const fullPayload =
+    appContentPayload(
+      data.settings,
+      data.newestUpdatedAt
+    );
+
+  const payload = {
+    updatedAt:
+      Number(
+        data.newestUpdatedAt || 0
+      ),
+
+    notice:
+      fullPayload.notice
+  };
+
+  const etag =
+    `W/"app-notification-${data.newestUpdatedAt}"`;
+
+  const headers = {
     "etag": etag,
 
     /*
-     * CDN/proxy မှာ response အဟောင်းမသိမ်းစေရန်။
-     * Android app ရဲ့ local cache နဲ့ ETag ကိုသာ
-     * အဓိကအသုံးပြုမည်။
+     * CDN/shared cache မထားဘဲ Android local ETag
+     * revalidation ကိုသာအသုံးပြုမည်။
      */
     "cache-control":
       "private, no-cache, max-age=0, must-revalidate",
-
-    "vary":
-      "x-cmflix-app-key",
 
     "x-content-type-options":
       "nosniff"
   };
 
   if (
-    requestETag &&
-    requestETag === etag
+    requestETagMatches(
+      request,
+      etag
+    )
   ) {
-    return new Response(
-      null,
-      {
-        status: 304,
-        headers: cacheHeaders
-      }
+    return notModifiedResponse(
+      headers
     );
   }
 
   return json(
     payload,
     200,
-    cacheHeaders
+    headers
   );
 }
 
@@ -5501,7 +5684,8 @@ async function upsertAppSetting(
 
 async function adminUpdateAppContent(
   request,
-  env
+  env,
+  context
 ) {
   const result =
     await requireAdmin(
@@ -5836,6 +6020,42 @@ async function adminUpdateAppContent(
       now
     )
   ]);
+
+  /*
+   * Admin က banner/app-content save လုပ်ပြီးနောက်
+   * လက်ရှိ Cloudflare data center ရှိ edge cache ကို
+   * invalidate လုပ်မည်။
+   *
+   * Cache API က data-center-local ဖြစ်သောကြောင့်
+   * တခြား PoP များရှိ cached copy သည် 6-hour TTL
+   * အတွင်း expire ဖြစ်မည်။
+   */
+  const publicContentURL =
+    new URL(request.url);
+
+  publicContentURL.pathname =
+    "/api/app-content";
+
+  publicContentURL.search = "";
+  publicContentURL.hash = "";
+
+  const cacheDeletePromise =
+    caches.default.delete(
+      new Request(
+        publicContentURL.toString(),
+        {
+          method: "GET"
+        }
+      )
+    );
+
+  if (context?.waitUntil) {
+    context.waitUntil(
+      cacheDeletePromise
+    );
+  } else {
+    await cacheDeletePromise;
+  }
 
   const updated =
     await readAppContentSettings(env);
