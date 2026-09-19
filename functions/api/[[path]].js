@@ -5389,18 +5389,37 @@ async function getPublicAppContent(
     );
 
   /*
-   * Weak ETag ဖြစ်ပေမယ့် config ပြောင်း/မပြောင်း
-   * စစ်ရန်အတွက် လုံလောက်သည်။
+   * DB update time ကို ETag အဖြစ်သုံးထားသည်။
+   *
+   * Config မပြောင်းရင် Android app က
+   * If-None-Match ပို့ပြီး 304 response ပဲရမယ်။
+   * JSON body အပြည့် ထပ် download လုပ်ရန်မလိုပါ။
    */
   const etag =
-    `W/"app-content-${
-      data.newestUpdatedAt
-    }"`;
+    `W/"app-content-${data.newestUpdatedAt}"`;
 
   const requestETag =
     request.headers.get(
       "if-none-match"
     );
+
+  const cacheHeaders = {
+    "etag": etag,
+
+    /*
+     * CDN/proxy မှာ response အဟောင်းမသိမ်းစေရန်။
+     * Android app ရဲ့ local cache နဲ့ ETag ကိုသာ
+     * အဓိကအသုံးပြုမည်။
+     */
+    "cache-control":
+      "private, no-cache, max-age=0, must-revalidate",
+
+    "vary":
+      "x-cmflix-app-key",
+
+    "x-content-type-options":
+      "nosniff"
+  };
 
   if (
     requestETag &&
@@ -5410,19 +5429,7 @@ async function getPublicAppContent(
       null,
       {
         status: 304,
-        headers: {
-          "etag": etag,
-
-          /*
-           * Device cache က 12 နာရီသုံးမယ်။
-           * CDN ဘက်မှာ 6 နာရီထားမယ်။
-           */
-          "cache-control":
-            "public, max-age=300, s-maxage=21600, stale-while-revalidate=86400",
-
-          "x-content-type-options":
-            "nosniff"
-        }
+        headers: cacheHeaders
       }
     );
   }
@@ -5430,14 +5437,10 @@ async function getPublicAppContent(
   return json(
     payload,
     200,
-    {
-      "etag": etag,
-
-      "cache-control":
-        "public, max-age=300, s-maxage=21600, stale-while-revalidate=86400"
-    }
+    cacheHeaders
   );
 }
+
 
 async function adminGetAppContent(
   request,
