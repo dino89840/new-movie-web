@@ -14,6 +14,8 @@ function isAllowedAppApi(pathname, method) {
     (
       path === "status" ||
       path === "bootstrap" ||
+      path === "app-content" ||
+
       path === "auth/me" ||
       path === "titles" ||
       path.startsWith("titles/") ||
