@@ -10,21 +10,23 @@ function isAllowedAppApi(pathname, method) {
   const path = pathname.replace(/^\/api\/?/, "");
 
   if (
-    method === "GET" &&
-    (
-      path === "status" ||
-      path === "bootstrap" ||
-      path === "app-content" ||
+  method === "GET" &&
+  (
+    path === "status" ||
+    path === "bootstrap" ||
+    path === "app-content" ||
+    path === "app-notification" ||
 
-      path === "auth/me" ||
-      path === "titles" ||
-      path.startsWith("titles/") ||
-      path === "favorites" ||
-      path.startsWith("favorites/")
-    )
-  ) {
-    return true;
-  }
+    path === "auth/me" ||
+    path === "titles" ||
+    path.startsWith("titles/") ||
+    path === "favorites" ||
+    path.startsWith("favorites/")
+  )
+) {
+  return true;
+}
+
 
   if (
     method === "POST" &&
