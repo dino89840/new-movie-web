@@ -62,7 +62,24 @@ export async function onRequest(context) {
   return bootstrap(request, env);
 }
 
-    if (path === "setup" && method === "POST") {
+/*
+ * Android app banner / announcement configuration.
+ *
+ * App ထဲတွင် local cache သုံးမည်ဖြစ်ပြီး server/CDN
+ * ဘက်တွင်လည်း cache headers ထည့်ပေးထားသည်။
+ */
+if (
+  path === "app-content" &&
+  method === "GET"
+) {
+  return getPublicAppContent(
+    request,
+    env
+  );
+}
+
+if (path === "setup" && method === "POST") {
+
       return setupAdmin(request, env);
     }
 
@@ -229,6 +246,29 @@ if (
   method === "POST"
 ) {
   return adminCreatePromoCode(
+    request,
+    env
+  );
+}
+
+/*
+ * Android app banner / notification admin endpoints.
+ */
+if (
+  path === "admin/app-content" &&
+  method === "GET"
+) {
+  return adminGetAppContent(
+    request,
+    env
+  );
+}
+
+if (
+  path === "admin/app-content" &&
+  method === "PUT"
+) {
+  return adminUpdateAppContent(
     request,
     env
   );
@@ -5162,6 +5202,653 @@ async function adminCreatePromoCode(
       expiresAt
     },
     201,
+    {
+      "cache-control":
+        "no-store, max-age=0"
+    }
+  );
+}
+/* -------------------- App content -------------------- */
+
+const APP_CONTENT_SETTING_KEYS = [
+  "app_banner_enabled",
+  "app_banner_url",
+  "app_banner_link",
+  "app_banner_version",
+
+  "app_notice_enabled",
+  "app_notice_id",
+  "app_notice_title",
+  "app_notice_message",
+  "app_notice_start_at",
+  "app_notice_end_at"
+];
+
+function appContentDefaults() {
+  return {
+    app_banner_enabled: "0",
+    app_banner_url: "",
+    app_banner_link:
+      "https://t.me/iqowoq",
+    app_banner_version: "1",
+
+    app_notice_enabled: "0",
+    app_notice_id: "1",
+    app_notice_title:
+      "အသိပေးချက်",
+    app_notice_message: "",
+    app_notice_start_at: "0",
+    app_notice_end_at: "0"
+  };
+}
+
+async function readAppContentSettings(env) {
+  const placeholders =
+    APP_CONTENT_SETTING_KEYS
+      .map(() => "?")
+      .join(", ");
+
+  const result =
+    await env.DB.prepare(
+      `SELECT
+         setting_key,
+         setting_value,
+         updated_at
+       FROM settings
+       WHERE setting_key IN (
+         ${placeholders}
+       )`
+    )
+      .bind(
+        ...APP_CONTENT_SETTING_KEYS
+      )
+      .all();
+
+  const settings =
+    appContentDefaults();
+
+  let newestUpdatedAt = 0;
+
+  for (
+    const row of result.results || []
+  ) {
+    settings[row.setting_key] =
+      String(
+        row.setting_value ?? ""
+      );
+
+    newestUpdatedAt = Math.max(
+      newestUpdatedAt,
+      Number(row.updated_at || 0)
+    );
+  }
+
+  return {
+    settings,
+    newestUpdatedAt
+  };
+}
+
+function appContentPayload(
+  settings,
+  updatedAt
+) {
+  return {
+    updatedAt:
+      Number(updatedAt || 0),
+
+    banner: {
+      enabled:
+        settings.app_banner_enabled ===
+        "1",
+
+      url:
+        String(
+          settings.app_banner_url || ""
+        ).trim(),
+
+      link:
+        String(
+          settings.app_banner_link || ""
+        ).trim(),
+
+      version:
+        String(
+          settings.app_banner_version ||
+          "1"
+        ).trim()
+    },
+
+    notice: {
+      enabled:
+        settings.app_notice_enabled ===
+        "1",
+
+      id:
+        String(
+          settings.app_notice_id ||
+          "1"
+        ).trim(),
+
+      title:
+        String(
+          settings.app_notice_title ||
+          "အသိပေးချက်"
+        ).trim(),
+
+      message:
+        String(
+          settings.app_notice_message ||
+          ""
+        ).trim(),
+
+      startAt:
+        Number(
+          settings.app_notice_start_at ||
+          0
+        ),
+
+      endAt:
+        Number(
+          settings.app_notice_end_at ||
+          0
+        )
+    }
+  };
+}
+
+function validOptionalHttpsURL(value) {
+  const text =
+    String(value || "").trim();
+
+  if (!text) {
+    return true;
+  }
+
+  try {
+    const url =
+      new URL(text);
+
+    return url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function getPublicAppContent(
+  request,
+  env
+) {
+  const data =
+    await readAppContentSettings(env);
+
+  const payload =
+    appContentPayload(
+      data.settings,
+      data.newestUpdatedAt
+    );
+
+  /*
+   * Weak ETag ဖြစ်ပေမယ့် config ပြောင်း/မပြောင်း
+   * စစ်ရန်အတွက် လုံလောက်သည်။
+   */
+  const etag =
+    `W/"app-content-${
+      data.newestUpdatedAt
+    }"`;
+
+  const requestETag =
+    request.headers.get(
+      "if-none-match"
+    );
+
+  if (
+    requestETag &&
+    requestETag === etag
+  ) {
+    return new Response(
+      null,
+      {
+        status: 304,
+        headers: {
+          "etag": etag,
+
+          /*
+           * Device cache က 12 နာရီသုံးမယ်။
+           * CDN ဘက်မှာ 6 နာရီထားမယ်။
+           */
+          "cache-control":
+            "public, max-age=300, s-maxage=21600, stale-while-revalidate=86400",
+
+          "x-content-type-options":
+            "nosniff"
+        }
+      }
+    );
+  }
+
+  return json(
+    payload,
+    200,
+    {
+      "etag": etag,
+
+      "cache-control":
+        "public, max-age=300, s-maxage=21600, stale-while-revalidate=86400"
+    }
+  );
+}
+
+async function adminGetAppContent(
+  request,
+  env
+) {
+  const result =
+    await requireAdmin(
+      request,
+      env
+    );
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const data =
+    await readAppContentSettings(env);
+
+  return json(
+    appContentPayload(
+      data.settings,
+      data.newestUpdatedAt
+    ),
+    200,
+    {
+      "cache-control":
+        "no-store, max-age=0"
+    }
+  );
+}
+
+async function upsertAppSetting(
+  env,
+  key,
+  value,
+  updatedAt
+) {
+  return env.DB.prepare(
+    `INSERT INTO settings
+     (
+       setting_key,
+       setting_value,
+       updated_at
+     )
+     VALUES (?, ?, ?)
+     ON CONFLICT(setting_key)
+     DO UPDATE SET
+       setting_value =
+         excluded.setting_value,
+       updated_at =
+         excluded.updated_at`
+  ).bind(
+    key,
+    String(value),
+    updatedAt
+  );
+}
+
+async function adminUpdateAppContent(
+  request,
+  env
+) {
+  const result =
+    await requireAdmin(
+      request,
+      env,
+      true
+    );
+
+  if (result.error) {
+    return result.error;
+  }
+
+  const body =
+    await readBody(request);
+
+  const banner =
+    body.banner || {};
+
+  const notice =
+    body.notice || {};
+
+  const bannerEnabled =
+    banner.enabled === true;
+
+  const bannerURL =
+    String(
+      banner.url || ""
+    ).trim();
+
+  const bannerLink =
+    String(
+      banner.link || ""
+    ).trim();
+
+  let bannerVersion =
+    String(
+      banner.version || ""
+    ).trim();
+
+  const noticeEnabled =
+    notice.enabled === true;
+
+  let noticeId =
+    String(
+      notice.id || ""
+    ).trim();
+
+  const noticeTitle =
+    String(
+      notice.title ||
+      "အသိပေးချက်"
+    ).trim();
+
+  const noticeMessage =
+    String(
+      notice.message || ""
+    ).trim();
+
+  const noticeStartAt =
+    Math.max(
+      0,
+      Number(notice.startAt || 0)
+    );
+
+  const noticeEndAt =
+    Math.max(
+      0,
+      Number(notice.endAt || 0)
+    );
+
+  if (
+    bannerEnabled &&
+    !bannerURL
+  ) {
+    return json(
+      {
+        error:
+          "Banner ဖွင့်ထားလျှင် image URL လိုအပ်ပါသည်"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
+  }
+
+  if (
+    !validOptionalHttpsURL(
+      bannerURL
+    )
+  ) {
+    return json(
+      {
+        error:
+          "Banner image URL သည် https:// URL ဖြစ်ရပါမည်"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
+  }
+
+  if (
+    !validOptionalHttpsURL(
+      bannerLink
+    )
+  ) {
+    return json(
+      {
+        error:
+          "Banner link သည် https:// URL ဖြစ်ရပါမည်"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
+  }
+
+  if (
+    bannerURL.length > 2000 ||
+    bannerLink.length > 2000
+  ) {
+    return json(
+      {
+        error:
+          "Banner URL သို့မဟုတ် link ရှည်လွန်းပါသည်"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
+  }
+
+  if (!bannerVersion) {
+    bannerVersion =
+      String(Date.now());
+  }
+
+  if (
+    bannerVersion.length > 100
+  ) {
+    return json(
+      {
+        error:
+          "Banner version ရှည်လွန်းပါသည်"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
+  }
+
+  if (
+    noticeTitle.length > 100
+  ) {
+    return json(
+      {
+        error:
+          "Notification title ကို စာလုံး 100 အတွင်းထားပါ"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
+  }
+
+  if (
+    noticeMessage.length > 1500
+  ) {
+    return json(
+      {
+        error:
+          "Notification message ကို စာလုံး 1500 အတွင်းထားပါ"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
+  }
+
+  if (
+    noticeEnabled &&
+    !noticeMessage
+  ) {
+    return json(
+      {
+        error:
+          "Notification ဖွင့်ထားလျှင် message လိုအပ်ပါသည်"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
+  }
+
+  if (
+    noticeEnabled &&
+    (
+      noticeStartAt <= 0 ||
+      noticeEndAt <= 0
+    )
+  ) {
+    return json(
+      {
+        error:
+          "Notification start/end date နှစ်ခုလုံးလိုအပ်ပါသည်"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
+  }
+
+  if (
+    noticeEnabled &&
+    noticeEndAt < noticeStartAt
+  ) {
+    return json(
+      {
+        error:
+          "Notification end date သည် start date ထက်နောက်ကျရပါမည်"
+      },
+      400,
+      {
+        "cache-control":
+          "no-store"
+      }
+    );
+  }
+
+  if (!noticeId) {
+    noticeId =
+      String(Date.now());
+  }
+
+  const now =
+    Date.now();
+
+  await env.DB.batch([
+    await upsertAppSetting(
+      env,
+      "app_banner_enabled",
+      bannerEnabled ? "1" : "0",
+      now
+    ),
+
+    await upsertAppSetting(
+      env,
+      "app_banner_url",
+      bannerURL,
+      now
+    ),
+
+    await upsertAppSetting(
+      env,
+      "app_banner_link",
+      bannerLink,
+      now
+    ),
+
+    await upsertAppSetting(
+      env,
+      "app_banner_version",
+      bannerVersion,
+      now
+    ),
+
+    await upsertAppSetting(
+      env,
+      "app_notice_enabled",
+      noticeEnabled ? "1" : "0",
+      now
+    ),
+
+    await upsertAppSetting(
+      env,
+      "app_notice_id",
+      noticeId,
+      now
+    ),
+
+    await upsertAppSetting(
+      env,
+      "app_notice_title",
+      noticeTitle,
+      now
+    ),
+
+    await upsertAppSetting(
+      env,
+      "app_notice_message",
+      noticeMessage,
+      now
+    ),
+
+    await upsertAppSetting(
+      env,
+      "app_notice_start_at",
+      String(
+        Math.trunc(
+          noticeStartAt
+        )
+      ),
+      now
+    ),
+
+    await upsertAppSetting(
+      env,
+      "app_notice_end_at",
+      String(
+        Math.trunc(
+          noticeEndAt
+        )
+      ),
+      now
+    )
+  ]);
+
+  const updated =
+    await readAppContentSettings(env);
+
+  return json(
+    {
+      ok: true,
+      message:
+        "App banner နှင့် notification setting သိမ်းပြီးပါပြီ။",
+
+      ...appContentPayload(
+        updated.settings,
+        updated.newestUpdatedAt
+      )
+    },
+    200,
     {
       "cache-control":
         "no-store, max-age=0"
